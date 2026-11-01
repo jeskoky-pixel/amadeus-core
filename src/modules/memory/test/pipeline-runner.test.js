@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { tmpdir } from "node:os";
-import { writeFileSync, rmSync } from "node:fs";
+import { writeFileSync, rmSync, mkdtempSync } from "node:fs";
 import { join } from "node:path";
 import { createExecutionRecorder, projectRootOf, MAX_BUFFERED_EVENTS } from "../src/pipeline-runner.js";
 import { validatePipeline } from "../src/pipeline.js";
@@ -360,14 +360,16 @@ test("dispose 摘掉监听，之后的窗口全清", () => {
 // P3（丙）：确认时刻的观察旁挂 + tool 不符检出
 // 设计见 mneme-research/mo-foundations/10 号；丙 = 旁挂文件，不动已发布的账本契约
 // ---------------------------------------------------------------------------
-test("P3：给了 memoryDir 时，confirm 把观察旁挂 + 报出 tool 不符", () => {
+test("P3：给了 memoryDir 时，confirm 把观察旁挂 + 报出 tool 不符", (t) => {
+  const memoryDir = mkdtempSync(join(tmpdir(), 'amadeus-pipeline-observation-'));
+  t.after(() => rmSync(memoryDir, { recursive: true, force: true }));
   const f = fakeCtx();
   let written = null;
   const rec = createExecutionRecorder({
     ctx: f.ctx,
     resolvePipeline: () => PIPE,
     persistRun: (root, id, run) => { written = { run }; },
-    memoryDir: "D:/mem-test"     // 注入（真实现里来自 config.memoryDir）
+    memoryDir // Isolated fixture; never write into the package or a fixed drive path.
   });
   const session = { id: "s1", header: { cwd: "C:\\proj" } };
   rec.start({ session, pipelineId: "demo" });
@@ -440,3 +442,4 @@ test("缓冲上限常量存在且是个正整数", () => {
   assert.equal(Number.isInteger(MAX_BUFFERED_EVENTS), true);
   assert.ok(MAX_BUFFERED_EVENTS > 0);
 });
+
