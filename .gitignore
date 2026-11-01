@@ -1,0 +1,13 @@
+node_modules/
+dist/
+.test-tmp/
+**/.test-tmp/
+**/node_modules/
+*.tgz
+*.log
+*.private.*
+*.sqlite*
+*.db*
+.env*
+.credentials*
+

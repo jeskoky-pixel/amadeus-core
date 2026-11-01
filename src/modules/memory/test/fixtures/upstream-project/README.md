@@ -1,0 +1,1 @@
+Historical fixtures from slow-stack/mneme 146fa3657dbb73c0498aba969977e7c14e13684a. Not Core release automation. Only used for retained parser and historical workflow regression; excluded from the npm package. Original MIT license remains in module root.

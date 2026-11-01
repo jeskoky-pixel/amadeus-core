@@ -1,0 +1,46 @@
+[
+  {
+    "module": "persona",
+    "disabled": true,
+    "others": true
+  },
+  {
+    "module": "persona",
+    "restored": true,
+    "sessionPreserved": true,
+    "eventsPreserved": true
+  },
+  {
+    "module": "state",
+    "disabled": true,
+    "others": true
+  },
+  {
+    "module": "state",
+    "restored": true,
+    "sessionPreserved": true,
+    "eventsPreserved": true
+  },
+  {
+    "module": "life",
+    "disabled": true,
+    "others": true
+  },
+  {
+    "module": "life",
+    "restored": true,
+    "sessionPreserved": true,
+    "eventsPreserved": true
+  },
+  {
+    "module": "memory",
+    "disabled": true,
+    "others": true
+  },
+  {
+    "module": "memory",
+    "restored": true,
+    "sessionPreserved": true,
+    "eventsPreserved": true
+  }
+]

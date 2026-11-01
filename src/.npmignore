@@ -1,0 +1,13 @@
+modules/*/test/
+modules/*/tests/
+modules/*/scripts/
+modules/*/.test-tmp/
+**/*.log
+**/*.private.*
+modules/*/docs/
+modules/*/*.md
+!modules/*/LICENSE
+!modules/*/NOTICE.md
+!modules/*/UPSTREAM.md
+modules/*/package-lock.json
+modules/*/.github/
