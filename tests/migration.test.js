@@ -31,7 +31,9 @@ test('snapshot preserves the active Memory Workspace directory and binding', asy
 });
 
 function tempRoot(t) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'amadeus-migration-'));
+  // GitHub Windows TEMP may use an 8.3 alias; fixtures use canonical paths.
+  // Production migration still rejects symlinks/junctions without exceptions.
+  const root = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'amadeus-migration-')));
   t.after(() => fs.rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }));
   return root;
 }
@@ -312,3 +314,4 @@ test('verifySnapshot rejects a tampered snapshot and reports the failure code', 
   assert.equal(verification.errors[0].code, 'HASH_MISMATCH');
   assert.equal(typeof verification.errors[0].message, 'string');
 });
+

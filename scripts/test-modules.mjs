@@ -52,7 +52,11 @@ for (const name of modules) {
     return match ? match[1] : '?';
   };
   const ok = !result.error && !result.signal && result.status === 0;
-  if (!ok) failed += 1;
+  if (!ok) {
+    failed += 1;
+    const lines = output.split(/\r?\n/);
+    for (let i = 0; i < lines.length; i++) if (/^not ok/.test(lines[i])) console.log(lines.slice(i, i + 55).join('\n'));
+  }
   const counts = `tests ${count('tests')}, pass ${count('pass')}, fail ${count('fail')}`;
   const reason = result.error ? `, spawn error: ${result.error.message}`
     : result.signal ? `, signal ${result.signal}` : '';
@@ -74,3 +78,4 @@ if (failed > 0) {
 } else {
   console.log(`All ${modules.length} module test groups passed.`);
 }
+
