@@ -1,7 +1,6 @@
 name: Core candidate checks
 on:
   push:
-  pull_request:
 permissions:
   contents: read
 jobs:
@@ -33,3 +32,4 @@ jobs:
           path: |
             *.tgz
             SHA256SUMS
+

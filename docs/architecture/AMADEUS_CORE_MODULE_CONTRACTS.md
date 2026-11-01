@@ -70,7 +70,7 @@ Core 自身新增 `amadeusCore` 服务和模型工具 `amadeus_experience_read`�
 ## 7. 当前差距（必须如实标注）
 
 1. Bilibili/Xiaohongshu 仅有进程内确定性模拟适配器；`overview().platforms` 对真实平台固定为 `unsupported`，不得宣称已接入或已抓取真实内容。
-2. 平台启用状态和权限重启后关闭；每日请求用量保存在 platform-budget.json，重启不清零；`PlatformRegistry` 以 `simulated: true` 为注册布尔检查，本身不做网络隔离。
+2. 平台启用状态和权限由 Core 配置持久化并在重启后恢复；每日请求用量保存在 platform-budget.json，重启不清零；`PlatformRegistry` 以 `simulated: true` 为注册布尔检查，本身不做网络隔离。
 3. 没有真实平台鉴权、账号映射、配额服务、失败重试/未知回执恢复；也没有真实平台的证据分级。
 4. Core 侧 QQ 适配器与发送链路未实现；Memory 内有 QQ provenance/Scene 单元测试，但本任务未验证真实 QQ Host 形态或发送权限链路。
 5. Memory 表单写入未在 v1 开放；Desktop 0.2.1-rc.3 的实际 Bundle/UI/migration/rollback 兼容性未在本任务运行验证。
@@ -84,3 +84,4 @@ Core 自身新增 `amadeusCore` 服务和模型工具 `amadeus_experience_read`�
 ## 后续执行证据（2026-11-02）
 
 上述源码审计阶段的“未验证”描述是历史检查范围。隔离 Desktop 的 Bundle、UI、四模块独立停用与重启已验证；Web 迁移导入/回滚及 108 项内容比对通过。最终状态以 AMADEUS_CORE_TEST_REPORT.md 为准。生产数据和真实 NapCat 仍未操作。
+

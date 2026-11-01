@@ -56,3 +56,9 @@ OpenCode Go `deepseek-v4.1-flash` 在同一持久 Session、同一 Activity 内�
 - 未覆盖全部历史生产数据库组合；不得把合成迁移演练解释为生产数据迁移已执行。
 
 本轮仅提交开发候选和 Draft PR，不合并、不创建正式 Tag/Release、不发布 npm 或市场条目。
+
+## 远程 CI 修复记录
+
+首轮 Linux Core 76/76、Memory 2715/2715、State 143/143、Persona 49/49。Life 的打包隐私检查发现保留 Memory 测试向源码相对目录写入合成 JSONL，已将测试改为唯一临时目录并清理，未修改生产算法或放宽打包检查。Windows 迁移夹具需使用规范路径而非 TEMP 8.3 别名，已修复；最终远程状态以 PR checks 为准。
+
+验收清理：隔离 Web/Desktop 的探索和 MCP 服务均已关闭，隔离模型驱动已移除，测试宿主已停止；生产 DSH/NapCat 未改动。

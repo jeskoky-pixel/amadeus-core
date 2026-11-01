@@ -44,3 +44,9 @@
 ## 8. 与活动的关系
 - 每步平台执行成功后由 activity.explore 调用 record，并把 eventId、steps 持久化到 activity.json 的 last。
 - 收据不独立调度、不主动发送，也不产生平台副作用。
+
+## 增量事件约定
+
+模型探索也使用同一经历记录路径。模拟社交操作来自 Owner Dry-run 路由，所有平台回执仍标明 simulation/externalAction:false。可信 State 服务按幂等 eventId 记录 exploration_completed，trust=simulation、scale=0.1；失败标注 unavailable/denied，不伪造 applied。
+
+MCP 另存最多 200 条调用元数据（eventId、serverId、toolName、Session、时间、结果状态），不保存参数/返回正文，不创建第二套长期记忆，也不把工具结果自动升级为可信 Persona 指令。
