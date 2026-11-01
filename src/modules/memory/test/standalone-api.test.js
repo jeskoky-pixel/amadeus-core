@@ -6,7 +6,7 @@ import { createSettings } from "../src/settings.js";
 import { createStandaloneApi } from "../src/api-standalone.js";
 import { PACKAGE_VERSION } from "../src/version-check.js";
 import { Config, applyLightModePreset } from "../src/config.js";
-import { rmSync, readFileSync } from "node:fs";
+import { rmSync, readFileSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createServeRuntime } from "../src/serve.js";
@@ -90,8 +90,9 @@ test("daemon serve runtime initializes scene policy with no Host grants", () => 
 });
 
 test("daemon default flags still deny a DB that already has tagged scene rows", async () => {
-  const lexical = join(tmpdir(), `mneme-serve-scene-${process.pid}-${Date.now()}`);
-  const dir = assertIsolatedMemoryDir(lexical, { qaRoot: tmpdir() });
+  const qaRoot = realpathSync.native(tmpdir());
+  const lexical = join(qaRoot, `mneme-serve-scene-${process.pid}-${Date.now()}`);
+  const dir = assertIsolatedMemoryDir(lexical, { qaRoot });
   let runtime;
   try {
     const seedStore = createStore(join(dir, "memory.db"));
@@ -842,3 +843,4 @@ test("standalone save and update cannot forge trusted event tags", async () => {
     close();
   }
 });
+
