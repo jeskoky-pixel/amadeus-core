@@ -1,0 +1,10 @@
+{
+  "version": "0.2.0-alpha.1",
+  "ready": true,
+  "modules": true,
+  "sessionPreserved": true,
+  "experiencesPreserved": true,
+  "realDisabled": true,
+  "explorationDisabled": true,
+  "mcpConfigPreserved": true
+}

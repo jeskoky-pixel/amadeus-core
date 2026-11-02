@@ -10,6 +10,10 @@ import { setWorkspaceBinding } from '../modules/memory/src/workspace-binding.js'
 import { CoreStore, MODULES, atomicJson } from './store.js';
 import { acquireLease, legacyConflicts, installLegacyGuard } from './ownership.js';
 import { host, member, assertIdle } from './host.js';
+import { AccountManager } from '../platforms/accounts.js';
+import {makeBilibiliAdapter} from '../platforms/bilibili.js';
+import {makeXiaohongshuAdapter} from '../platforms/xiaohongshu.js';
+import {createPlatformTransport} from '../platforms/transport.js';
 import { PlatformRegistry, makeSimulatedAdapter } from '../platforms/registry.js';
 import { Experiences } from './experiences.js';
 import { CoreActivity } from './activity.js';
@@ -41,7 +45,10 @@ export class CoreRuntime {
     this.handles = new Map(); this.bridges = {}; this.status = 'starting'; this.problem = null;
     this.activeConfigs={};
     this.runningRevision = null; this.tail = Promise.resolve();
-    this.platforms=new PlatformRegistry({budgetFile:path.join(root,'platform-budget.json')});
+    this.accounts=new AccountManager({file:path.join(root,'platform-accounts.json'),workspaceId:()=>this.store.state.workspaceId});
+    const real=[makeBilibiliAdapter(),makeXiaohongshuAdapter({transport:createPlatformTransport({allowedOrigins:['https://openaccount.xiaohongshu.com']})})];
+    this.platforms=new PlatformRegistry({budgetFile:path.join(root,'platform-budget.json'),trustedRealAdapters:real,accounts:this.accounts,authorizeIdentity:identity=>member(this.ctx,this.store.state.workspaceId===identity?.workspaceId?identity.workspaceId:null,identity?.sessionId)});
+    for(const adapter of real){this.accounts.register(adapter);this.platforms.register(adapter);}
     this.platforms.register(makeBilibiliMock());this.platforms.register(makeXiaohongshuMock());
     this.experiences=new Experiences(this);this.activity=new CoreActivity(this);
     this.mcp=new McpManager(this);
@@ -112,20 +119,47 @@ export class CoreRuntime {
     this.configureExplorationPlatforms();
   }
   configureExplorationPlatforms(){
-    for(const {id} of this.platforms.list())this.platforms.configure(id,this.store.state.platforms[id]??{enabled:this.store.state.explorationEnabled===true,permissions:['read','search','browse'],maxRequests:20});
+    for(const {id,simulated} of this.platforms.list())this.platforms.configure(id,this.store.state.platforms[id]??{enabled:simulated&&this.store.state.explorationEnabled===true,permissions:simulated?['read','search','browse']:[],maxRequests:20});
   }
-  savePlatform(input){return this.serial(()=>{
+  savePlatform(input){return Promise.resolve().then(()=>{
     const wasApplied=this.runningRevision===this.store.state.revision;
     const entry=this.platforms.entries.get(input.id),c=input.config;
-    if(!entry||!c||typeof c.enabled!=='boolean'||!Array.isArray(c.permissions)||c.permissions.some(p=>!entry.adapter.capabilities.includes(p))||!Number.isSafeInteger(c.maxRequests)||c.maxRequests<1||c.maxRequests>1000)throw Error('CORE_PLATFORM_CONFIG');
-    this.store.update(input.revision,s=>{s.platforms[input.id]={enabled:c.enabled,permissions:[...new Set(c.permissions)],maxRequests:c.maxRequests};});
+    if(!entry||!c||(c.autonomous!==undefined&&typeof c.autonomous!=='boolean')||(c.minIntervalMs!==undefined&&(!Number.isSafeInteger(c.minIntervalMs)||c.minIntervalMs<0||c.minIntervalMs>3600000))||typeof c.enabled!=='boolean'||!Array.isArray(c.permissions)||c.permissions.some(p=>!entry.adapter.capabilities.includes(p))||!Number.isSafeInteger(c.maxRequests)||c.maxRequests<1||c.maxRequests>1000)throw Error('CORE_PLATFORM_CONFIG');
+    this.store.update(input.revision,s=>{s.platforms[input.id]={enabled:c.enabled,permissions:[...new Set(c.permissions)],maxRequests:c.maxRequests,autonomous:c.autonomous??entry.adapter.simulated===true,minIntervalMs:c.minIntervalMs??0};});
     this.platforms.configure(input.id,this.store.state.platforms[input.id]);if(wasApplied)this.runningRevision=this.store.state.revision;return this.overview();
   });}
   dryRunPlatform(input){return this.serial(async()=>{
     if(this.status!=='ready')throw Error('CORE_NOT_READY');
+    if(!this.platforms.entries.get(input.id)?.adapter.simulated)throw Error('CORE_PLATFORM_DENIED');
     const session=await this.activity.session();
     return this.activity.explore(({step})=>step===0?{platform:input.id,operation:input.operation,input:input.input}:null,{maxSteps:1});
   });}
+  platformRead(input){return this.serial(async()=>{
+    if(this.status!=='ready')throw Error('CORE_NOT_READY');
+    if(!['read','browse','search','comments','related','subtitles','images'].includes(input.operation))throw Error('CORE_PLATFORM_DENIED');
+    return this.activity.explore(({step})=>step===0?{platform:input.id,operation:input.operation,input:input.input}:null,{maxSteps:1});
+  });}
+  async accountAction(input){
+    if(!['logout','revoke','clear'].includes(input.action)&&this.status!=='ready')throw Error('CORE_NOT_READY');
+    const id=input.id;if(!['bilibili','xiaohongshu'].includes(id))throw Error('CORE_PLATFORM_INPUT');
+    // Do not queue revocation behind an active network call. Epoch checks discard in-flight results.
+    if(['begin','logout','revoke','clear'].includes(input.action)){
+      const wasApplied=this.runningRevision===this.store.state.revision;
+      this.store.update(input.revision,s=>{s.platforms[id]={enabled:false,permissions:[],maxRequests:s.platforms[id]?.maxRequests??20};});
+      this.platforms.configure(id,this.store.state.platforms[id]);
+      if(wasApplied)this.runningRevision=this.store.state.revision;
+    }
+    switch(input.action){
+      case 'begin':return this.accounts.begin(id,input.options);
+      case 'poll':return this.accounts.poll(id,input.loginId);
+      case 'verify':return this.accounts.verify(id);
+      case 'refresh':return this.accounts.verify(id,{refresh:true});
+      case 'logout':return this.accounts.logout(id);
+      case 'clear':return this.accounts.logout(id,{clear:true});
+      case 'revoke':return this.accounts.revoke(id);
+      default:throw Error('CORE_PLATFORM_INPUT');
+    }
+  }
   prepareExploration(){return this.serial(async()=>{
     if(this.status!=='ready')throw Error('CORE_NOT_READY');
     const session=await this.activity.session();return {sessionId:session.id};
@@ -206,13 +240,13 @@ export class CoreRuntime {
     });
   }
   overview() {
-    return { version: '0.1.0-alpha.1', status: this.status, problem: this.problem,
+    return { version: '0.2.0-alpha.1', status: this.status, problem: this.problem,
       workspaceId: this.store.state.workspaceId, revision: this.store.state.revision,
       runningRevision: this.runningRevision, pendingRestart: this.store.state.revision !== this.runningRevision,
       modules: Object.fromEntries(MODULES.map(n => [n, { enabled: this.store.state.modules[n].enabled, mounted: this.handles.has(n) }])),
       workspaces: (host(this.ctx, 'workspaceRegistry')?.list?.() ?? []).map(w => ({ id: w.id, title: w.title })),
-      platforms: [{ id: 'bilibili', status: 'unsupported', enabled: false }, { id: 'xiaohongshu', status: 'unsupported', enabled: false }],
-      simulations:this.platforms.list(),activity:this.activity.summary(),experiences:this.experiences.ownerList(),
+      platforms:this.platforms.list().filter(p=>!p.simulated),
+      simulations:this.platforms.list().filter(p=>p.simulated),activity:this.activity.summary(),experiences:this.experiences.ownerList(),
       explorationEnabled:this.store.state.explorationEnabled===true,
       activityBudgetMs:this.store.state.activityBudgetMs??120000,
       mcp:this.mcp.overview(),
@@ -228,7 +262,7 @@ export class CoreRuntime {
   simulate(){return this.serial(async()=>{
     if(this.status!=='ready')throw Error('CORE_NOT_READY');
     if(this.activity.busy||(this.activity.saved.last?.mode==='model'&&this.activity.saved.phase!=='Idle'))throw Error('CORE_ACTIVITY_BUSY');
-    const ids=this.platforms.list().map(p=>p.id);
+    const ids=this.platforms.list().filter(p=>p.simulated).map(p=>p.id);
     for(const id of ids)this.platforms.configure(id,{enabled:true,permissions:['read'],maxRequests:20});
     try{return await this.activity.explore(({step})=>step<ids.length?{platform:ids[step],operation:'read',input:{id:'robot-demo'}}:null);}
     finally{this.configureExplorationPlatforms();}
@@ -247,5 +281,5 @@ export class CoreRuntime {
   });}
   importData(input){return this.serial(()=>importData(this,input));}
   rollbackData(input){return this.serial(()=>rollbackData(this,input));}
-  async dispose() { this.status='stopping';await this.mcp.dispose();await this.tail; await this.stopModules(); this.release?.(); this.release = null; this.removeLegacyGuard?.();this.status = 'stopped'; }
+  async dispose() { this.status='stopping';this.accounts.dispose();await this.mcp.dispose();await this.tail; await this.stopModules(); this.release?.(); this.release = null; this.removeLegacyGuard?.();this.status = 'stopped'; }
 }

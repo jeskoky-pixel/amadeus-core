@@ -1,0 +1,8 @@
+# Add a trusted platform
+1. Write an internal factory with id, contractVersion:2, mode:real, version, name/category, authMethods, capabilities, requiresAccount and execute(operation,input,{signal,credentials}). Validate all inputs and whitelist outputs.
+2. Compose it in CoreRuntime's trustedRealAdapters constructor list and AccountManager registration. HTTP/model content cannot do this. No remote plugin installation.
+3. Optional authentication contract: beginLogin -> private challenge + safe public verification data; pollLogin -> pending or verified identity/credentials/expiry/scopes; validateAccount, refreshAccount, revokeAccount. Fail with sanitized CORE_PLATFORM codes. Use AccountManager, never write tokens yourself.
+4. Use createPlatformTransport with immutable exact HTTPS origins, redirect rejection, timeout and bounded streamed JSON. Never accept model URLs. Test loopback origins exist only in test compositions.
+5. Declare only implemented read capabilities. Social actions are deliberately blocked by registry until a future reviewed executor adds target/content validation, durable idempotency, cooldown, uncertain-result reconciliation and receipts. Do not turn a permission checkbox into execution support.
+6. Core GUI renders catalog and capabilities automatically; specialized auth prompts can be added within Account section. Current auth dispatcher recognizes the two built-ins and must be extended deliberately for a third auth type. No Memory/Life/State/Persona changes required.
+7. Example-real in tests/real-platforms.test.js validates admission, receipt integrity, isolation, revocation and budgets using synthetic data. It is not shipped as an installable platform or advertised as a live service.

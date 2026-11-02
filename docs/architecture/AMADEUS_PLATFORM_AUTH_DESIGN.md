@@ -1,0 +1,8 @@
+# Account authorization and credentials
+Account identity is Workspace + platformId + accountId, never display name. Only Owner-authorized same-origin marked POST can start, poll, verify, refresh, disconnect, revoke or clear accounts. Login challenges are one-time, time-limited, rate-limited and bound to the Workspace and a random login ID. No ordinary callback can supply an identity or register an adapter.
+
+Credentials, device_code, app secrets and Bilibili cookies remain process-local. platform-accounts.json schema 1 contains sanitized identity/status/scopes/expiry only. Restart reports expired credentials; no silent plaintext persistence. Host/official Desktop source inspection did not establish a reusable plugin safeStorage contract, so no unverified DPAPI bridge is claimed. JavaScript memory is not a hardware vault; stopping Host discards references, not a guaranteed RAM zeroization.
+
+XHS uses official device grant, requiring the user's approved Web app. Poll slow_down increases minimum interval. Token identity must match min_user_info. Refresh verifies identity. Remote revoke requires separate platform capability; local permissions/credentials are removed even if remote revoke fails. Bilibili website QR requires explicit GUI opt-in; official OAuth is documented as a separate developer-app route, not implemented by pretending website cookies are OAuth.
+
+Start/switch/logout/revoke clears real platform permissions. Revocation epoch discards in-flight results. No browser cookie import, password prompt or QR-code fabrication. QR is generated locally from the returned validated verification URL; no third-party QR image service. Verification links/user codes are short-lived authorization data and should not be shared or included in screenshots.

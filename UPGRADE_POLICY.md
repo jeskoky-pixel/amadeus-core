@@ -1,6 +1,6 @@
 # Upgrade policy
 
-Core is an unreleased `0.1.0-alpha.1` candidate. It is not a replacement recommendation for production yet.
+Core is an unreleased `0.2.0-alpha.1` candidate. It is not a replacement recommendation for production yet.
 
 Code and user data are separate. The default data root is `DSH_HOME/amadeus-core`, not the npm installation directory. Disabling/uninstalling the Bundle must not remove this directory. Module data formats remain Memory SQLite/ACL 2, Life SQLite 10, State SQLite 2 and Persona JSON 1; Core metadata is JSON schema 1.
 
@@ -8,3 +8,5 @@ Every future migration must validate the prior schema, take a consistent recover
 
 Before a release, test previous stable version → synthetic populated data → update → restart → content and permission checks. Retain the prior artifact, checksum, configuration and compatible data snapshot. A minor release must not silently remove existing functionality.
 
+
+Alpha 0.1 → 0.2 is additive: Core schema 1 and all four module schemas remain unchanged. New platform-accounts.json schema 1 stores only account metadata; credentials/pending grants are memory-only. Existing Mock grants never enable real adapters. Optional platform cooldown/autonomy fields default safely. Older Core ignores new account metadata; preserve the full Core data directory and previous package before downgrade. Account login must be repeated after restart.

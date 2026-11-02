@@ -1,6 +1,6 @@
 {
   "name": "@fg-lab/amadeus-core",
-  "version": "0.1.0-alpha.1",
+  "version": "0.2.0-alpha.1",
   "private": true,
   "description": "Unified modular Amadeus Core for DSH; development candidate",
   "license": "MIT",
@@ -42,7 +42,8 @@
   "dependencies": {
     "@modelcontextprotocol/client": "2.3.0",
     "ajv": "8.20.0",
-    "morphicons": "^1.7.1"
+    "morphicons": "^1.7.1",
+    "qrcode": "1.5.4"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",

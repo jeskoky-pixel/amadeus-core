@@ -35,13 +35,15 @@ export function createCoreHandler(ctx, runtime) {
       else if (pathname === PREFIX + '/mcp/connect') data = await runtime.serial(()=>runtime.mcp.connect(body.id));
       else if (pathname === PREFIX + '/mcp/secret') data = await runtime.serial(()=>({reference:runtime.mcp.store.secret(body.value)}));
       else if (pathname === PREFIX + '/platform/configure') data = await runtime.savePlatform(body);
+      else if (pathname === PREFIX + '/platform/account') data = await runtime.accountAction(body);
+      else if (pathname === PREFIX + '/platform/read') data = await runtime.platformRead(body);
       else if (pathname === PREFIX + '/platform/dry-run') data = await runtime.dryRunPlatform(body);
       else if (pathname === PREFIX + '/import') data = await runtime.importData(body);
       else if (pathname === PREFIX + '/rollback') data = await runtime.rollbackData(body);
       else return send(res, 404, { ok: false, error: 'CORE_NOT_FOUND' });
       return send(res, 200, { ok: true, data });
     } catch (e) {
-      const error = /^CORE_[A-Z_]+(?:: [a-z,-]+)?$/.test(e.message) ? e.message : 'CORE_OPERATION_FAILED';
+      const error = /^CORE_[A-Z0-9_]+(?:: [a-z,-]+)?$/.test(e.message) ? e.message : 'CORE_OPERATION_FAILED';
       return send(res, e.message.includes('CONFLICT') ? 409 : 400, { ok: false, error });
     }
   };
