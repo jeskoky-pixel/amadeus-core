@@ -14,12 +14,14 @@ MCP 采用官方 SDK 2.3.0，实际本地 stdio/Streamable HTTP 协议；管理�
 
 | 范围 | 结果 | 限制 |
 | --- | --- | --- |
-| Core 最终代码 | 76/76 通过 | 含实际 stdio 进程退出、重连、并行服务隔离 |
-| Memory 保留回归 | 2714 通过 / 2715 项 | Windows 符号链接权限导致 1 跳过 |
+| Core 合并前修复 | 86/86 通过 | 含实际 stdio 进程退出、重连、并行服务隔离 |
+| Memory 本机 Windows | 2714 通过 / 2715 项 | 1 项符号链接权限跳过，未计入通过 |
+| Memory Linux CI 基线 | 2715/2715 | 无跳过；见运行 41344688337 |
+| Memory GitHub Windows CI 基线 | 2715/2715 | Runner 有符号链接权限，与本机条件不同 |
 | Life | 213/213 | 合成数据 |
 | State | 143/143 | 合成数据 |
 | Persona | 49/49 | 合成数据 |
-| 构建、发行包清单 | 通过 | 私有 Alpha，不发布 |
+| 构建、发行包清单 | 通过 | Alpha 开发候选，不发布 |
 | npm production dependency audit | 0 vulnerabilities | 本次扫描结果，不构成完整安全审计 |
 
 Memory 曾因安装时省略 peer dependencies 产生导入失败；恢复正常依赖后全套重跑得到上表结果。历史上游 CI 解析测试使用标注来源的归档夹具，不代表本项目发布工作流已验证。Core CI 只有 contents:read，无发布步骤。
@@ -52,7 +54,7 @@ OpenCode Go `deepseek-v4.1-flash` 在同一持久 Session、同一 Activity 内�
 - Hosted MCP 认证配置已用本地 Bearer 服务验证，未连接第三方账号。
 - stdio 不提供操作系统沙箱；管理员须信任安装程序，只读分类是管理员声明，不能限制恶意服务自身的系统权限。
 - 凭据文件不加密；创建 mode 0600，Windows 依赖用户数据目录 ACL。列表、模型结果及事件记录不返回凭据，stderr 丢弃。
-- Windows 1 项符号链接测试跳过；Linux CI 结果须以实际远程运行记录为准。
+- 本机 Windows 1 项符号链接测试跳过；历史最终 Linux 和 GitHub Windows Runner 均 2715/2715，不能混淆本机与 CI 环境。当前提交远程结果以 PR checks 为准。
 - 未覆盖全部历史生产数据库组合；不得把合成迁移演练解释为生产数据迁移已执行。
 
 本轮仅提交开发候选和 Draft PR，不合并、不创建正式 Tag/Release、不发布 npm 或市场条目。
@@ -62,3 +64,16 @@ OpenCode Go `deepseek-v4.1-flash` 在同一持久 Session、同一 Activity 内�
 首轮 Linux Core 76/76、Memory 2715/2715、State 143/143、Persona 49/49。Life 的打包隐私检查发现保留 Memory 测试向源码相对目录写入合成 JSONL，已将测试改为唯一临时目录并清理，未修改生产算法或放宽打包检查。Windows 迁移夹具需使用规范路径而非 TEMP 8.3 别名，已修复；最终远程状态以 PR checks 为准。
 
 验收清理：隔离 Web/Desktop 的探索和 MCP 服务均已关闭，隔离模型驱动已移除，测试宿主已停止；生产 DSH/NapCat 未改动。
+
+
+## 合并前修复（2026-11-02）
+
+Memory Config Forms 写入现已实现：白名单仅为原 GUI 的 13 个结构参数，按 Memory Schema 校验，原子写入 Core 配置并保留备份/未知导入字段。路径、严格 QQ、Scene ACL、统一 ACL、Memory Persona 禁用策略不允许普通表单修改。volatile 引用仅在 HTTP 表单快照中解包为 JSON 值，模块挂载仍使用原 Schema。
+
+保存不打断进行中的模型/工具调用；显示待应用，并由现有“应用配置”安全边界重载。修复表单变更后父页面不刷新、Memory 基础配置嵌入 ACL 条件分支、首次异步读取误判编辑冲突。仅修正 UI 层级及加载逻辑，未改数据库/业务算法。
+
+已通过原客户端 adapter→真实 HTTP→CoreRuntime 的保存/重启/恢复/拒绝写入回归，以及实际隔离 Desktop 的 GUI 保存9→应用→重启读9→恢复默认5→应用。原 Session、经历 ID 不变，强制策略未退化。证据：`../evidence/memory-gui-save-checks.json`、`memory-gui-restart-restore-checks.json`。
+
+MCP 增加类型批量授权和 OR 关系说明；补测具体 Session、非 Owner 私聊、未来成员、跨 Workspace 与不可信 Scene。目录明确为一个参考服务的基础入口，不是完整 Hosted Market。
+
+合并门禁：本地修复、GUI、完整回归通过；最终远程 Linux/Windows 检查记录在 PR #1。合并为开发基线不代表正式发布或真实平台可用。未授权本轮执行合并。

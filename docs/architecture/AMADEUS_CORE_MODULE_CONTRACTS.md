@@ -27,7 +27,7 @@ Core 自身新增 `amadeusCore` 服务和模型工具 `amadeus_experience_read`�
 - 数据根必须是绝对路径（默认 `$DSH_HOME/amadeus-core`），用户数据不进入 npm 包。若存在 `dataGeneration`，模块数据位于 `generations/<uuid>/live`；UUID 格式不合法即拒绝启动。
 - `CoreStore` schema 1 采用 revision 乐观并发；每次更新先把旧状态原子写入 `backups/core-r<revision>.json`，再以 `0600` 临时文件 + fsync + rename 提交。
 - 保存配置与运行配置分离：`overview().pendingRestart`/`runningRevision` 表示差异；`applyChanges()` 需要写者租约、Workspace 所有已加载 Session 均无未结束 turn，且 Activity 不 busy。
-- 配置表单只允许 life/state 的字段白名单、每次最多 200 个单键 `set/unset`；`databasePath` 永远不可由表单修改。Memory 当前只提供有效配置读取，未开放 Core 表单写入。
+- 配置表单允许 life/state 字段白名单及 Memory GUI 的 13 个结构参数，每次最多 200 个单键 set/unset。Memory 使用原 Schema 校验和 volatile JSON 解包；路径、Core 强制策略不能写入。修订冲突返回 409，原子持久化并保留备份。Memory 保存后明确待应用，在无活跃工具/活动的安全边界通过“应用配置”重载。
 
 ## 3. 版本 1 可信 Host API
 
@@ -73,8 +73,8 @@ Core 自身新增 `amadeusCore` 服务和模型工具 `amadeus_experience_read`�
 2. 平台启用状态和权限由 Core 配置持久化并在重启后恢复；每日请求用量保存在 platform-budget.json，重启不清零；`PlatformRegistry` 以 `simulated: true` 为注册布尔检查，本身不做网络隔离。
 3. 没有真实平台鉴权、账号映射、配额服务、失败重试/未知回执恢复；也没有真实平台的证据分级。
 4. Core 侧 QQ 适配器与发送链路未实现；Memory 内有 QQ provenance/Scene 单元测试，但本任务未验证真实 QQ Host 形态或发送权限链路。
-5. Memory 表单写入未在 v1 开放；Desktop 0.2.1-rc.3 的实际 Bundle/UI/migration/rollback 兼容性未在本任务运行验证。
-6. 现有 `tests/core-host.test.js`、`tests/platforms.test.js`、`tests/migration.test.js` 覆盖部分 Host/平台/迁移契约；本次只改文档，未新增或运行测试，不能据此宣称完整验收。
+5. Memory 表单保存、重启读取与恢复默认已经在隔离 Desktop 0.2.1-rc.3 实际验证。旧数据迁移保持原流程，详见最新测试报告。
+6. 现有 `tests/core-host.test.js`、`tests/platforms.test.js`、`tests/migration.test.js` 覆盖部分 Host/平台/迁移契约；当前自动化及 GUI 证据以最新测试报告为准。
 
 ## 8. 变更规则
 
@@ -84,4 +84,5 @@ Core 自身新增 `amadeusCore` 服务和模型工具 `amadeus_experience_read`�
 ## 后续执行证据（2026-11-02）
 
 上述源码审计阶段的“未验证”描述是历史检查范围。隔离 Desktop 的 Bundle、UI、四模块独立停用与重启已验证；Web 迁移导入/回滚及 108 项内容比对通过。最终状态以 AMADEUS_CORE_TEST_REPORT.md 为准。生产数据和真实 NapCat 仍未操作。
+
 

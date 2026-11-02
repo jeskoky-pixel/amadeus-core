@@ -116,3 +116,9 @@ Codex 已实际运行 **两个 stdio 服务 + 一个 Streamable HTTP 服务**的
 - stdio 依赖宿主机隔离，本实现不提供 OS 级沙箱。
 - 秘密以私有 JSON 文件保存，依赖用户数据目录的文件权限，未额外加密。
 - 子系统没有分布式配额服务；Core 数据根的独占写者租约防止多个正常 Host 同时写入。
+
+## 合并前授权说明修订
+
+qq-group / qq-private 是当前 Core Workspace 内可信同类型 Session 的批量授权，包含之后新增的已验证成员。qq-private 不限 Owner。具体 Session 与类型授权为 OR，移除具体 ID 不抵消类型授权。初始没有任何授予，工具初始关闭。GUI 已增加中英文提醒，权限实现未改变。
+
+服务目录只是基础参考入口，当前一个官方 filesystem 示例，未预装/未部署，不是完整 Hosted MCP Market。真实平台仍仅 Mock，与 MCP 目录分离。

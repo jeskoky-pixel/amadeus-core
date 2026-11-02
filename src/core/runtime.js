@@ -20,6 +20,21 @@ import {makeBilibiliMock,makeXiaohongshuMock} from '../platforms/mock-platforms.
 
 const definitions = { memory, life, state, persona };
 const fields = { life: lifeFields, state: stateFields };
+// Structural fields exposed by the retained Memory GUI. Feature switches use
+// Memory's existing override store; paths and Core policy are never form-owned.
+const memoryFormFields = ['language', 'dreamThresholdCount', 'dreamThresholdChars',
+  'dreamDelayMs', 'sleepIdleMinutes', 'maxInjectedItems', 'importanceThreshold',
+  'injectContentMaxChars', 'injectRotationTurns', 'vectorSearchTopK',
+  'vectorSearchThreshold', 'hybridSearchVectorWeight', 'autoReindexOnBoot'];
+const memoryPolicy = Object.freeze({ sceneIsolationEnabled: true, sceneStrictQQ: true,
+  unifiedSessionAclEnabled: true, personaEnabled: false });
+function formValue(value) {
+  // Schemastery volatile values are runtime refs, not JSON field values.
+  if(value && typeof value.get==='function' && Symbol.for('cosmokit.volatile.write') in value)return formValue(value.get());
+  if(Array.isArray(value))return value.map(formValue);
+  if(value && typeof value==='object')return Object.fromEntries(Object.entries(value).map(([key,child])=>[key,formValue(child)]));
+  return value;
+}
 export class CoreRuntime {
   constructor(ctx, root) {
     this.ctx = ctx; this.root = root; this.store = new CoreStore(root);
@@ -61,7 +76,7 @@ export class CoreRuntime {
       if (!settings.modules[n].enabled) continue;
       const module = definitions[n];
       const config = { ...this.effectiveConfig(n), __coreBridge: bridge => { this.bridges[n] = bridge; } };
-      if (n === 'memory') Object.assign(config, { memoryDir, sceneIsolationEnabled: true, sceneStrictQQ: true, unifiedSessionAclEnabled: true, personaEnabled: false });
+      if (n === 'memory') Object.assign(config, { memoryDir, ...memoryPolicy });
       if (n === 'life' || n === 'state') config.databasePath = path.join(moduleRoot, n, `${n}.sqlite`);
       if (n === 'persona') config.dataDirectory = path.join(moduleRoot, 'persona');
       this.activeConfigs[n]=config;
@@ -119,29 +134,30 @@ export class CoreRuntime {
     if (!MODULES.includes(n)) throw Error('CORE_MODULE_INVALID');
     const saved = this.store.state.modules[n].config;
     if (n === 'memory') {
-      const validated = MemoryConfig({ autoInject: true, autoSummarize: false, autoDream: false, ...saved });
+      const validated = MemoryConfig({ autoInject: true, autoSummarize: false, autoDream: false, ...saved, ...memoryPolicy });
       return validated;
     }
     const defaults = Object.fromEntries((fields[n] ?? []).map(f => [f.key, f.default]));
     return { ...defaults, ...saved };
   }
   form(n) {
+    if(n!=='memory'&&!fields[n])throw Error('CORE_MODULE_INVALID');
     return { status: 'ready', writable: true, revision: this.store.state.revision,
-      value: this.effectiveConfig(n), pendingRestart: this.runningRevision !== this.store.state.revision };
+      value: formValue(this.effectiveConfig(n)), pendingRestart: this.runningRevision !== this.store.state.revision };
   }
   async saveForm(n, ops, revision) {
-    if (!fields[n] || !Array.isArray(ops) || ops.length > 200) throw Error('CORE_CONFIG_INVALID');
-    const allowed = new Set(fields[n].map(f => f.key).filter(key=>key!=='databasePath'));
+    if ((n!=='memory'&&!fields[n]) || !Array.isArray(ops) || ops.length > 200) throw Error('CORE_CONFIG_INVALID');
+    return this.serial(async () => {
+    const allowed = new Set(n==='memory'?memoryFormFields:fields[n].map(f => f.key).filter(key=>key!=='databasePath'));
     const next = structuredClone(this.store.state.modules[n].config);
     for (const op of ops) {
-      if (!Array.isArray(op.path) || op.path.length !== 1 || !allowed.has(op.path[0])) throw Error('CORE_CONFIG_INVALID');
+      if (!op || !Array.isArray(op.path) || op.path.length !== 1 || !allowed.has(op.path[0])) throw Error('CORE_CONFIG_INVALID');
       if (op.op === 'set') next[op.path[0]] = op.value;
       else if (op.op === 'unset') delete next[op.path[0]];
       else throw Error('CORE_CONFIG_INVALID');
     }
-    const result = definitions[n].Config['~standard'].validate(next);
+    const result = (n==='memory'?MemoryConfig:definitions[n].Config)['~standard'].validate(n==='memory'?{...next,...memoryPolicy}:next);
     if (result.issues) throw Error('CORE_CONFIG_INVALID');
-    return this.serial(async () => {
       const wasApplied=this.runningRevision===this.store.state.revision;
       this.store.update(revision, s => { s.modules[n].config = next; });
       if(n==='state'&&this.activeConfigs.state){

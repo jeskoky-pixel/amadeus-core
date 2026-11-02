@@ -659,7 +659,7 @@ window.__ModuleLoader__.load({
         "memory.am.coverage": "索引覆盖",
         "memory.am.featureHint": "开关改的是同一份运行时覆盖；保存后按提示重载插件。",
         "memory.am.configUnavailable": "当前 DSH 没有提供 Config Forms；请到插件管理器修改这些参数。",
-        "memory.am.configHint": "这些结构参数与插件管理器使用同一份 Config Forms；保存后插件会重载。",
+        "memory.am.configHint": "这些结构参数通过 Config Forms 保存；请按宿主提示应用配置或重载插件后生效。",
         "memory.am.conflict": "配置已被其他页面修改；请取消后重新编辑，避免覆盖别人的保存。",
         "memory.am.save": "保存",
         "memory.am.cancel": "取消",
@@ -1875,7 +1875,7 @@ window.__ModuleLoader__.load({
         "memory.am.coverage": "Index coverage",
         "memory.am.featureHint": "These switches use the same runtime override store as the full panel; reload when prompted.",
         "memory.am.configUnavailable": "This DSH build does not expose Config Forms; edit these values in Plugin Manager.",
-        "memory.am.configHint": "These structural values share the same Config Forms authority as Plugin Manager; saving reloads the plugin.",
+        "memory.am.configHint": "These structural values use Config Forms; apply configuration or reload the plugin when prompted by the host.",
         "memory.am.conflict": "Another page changed the configuration. Cancel and reopen before saving so you do not overwrite it.",
         "memory.am.save": "Save",
         "memory.am.cancel": "Cancel",
@@ -5228,7 +5228,8 @@ window.__ModuleLoader__.load({
     function configFormTransition(previous, snapshot, priorSnapshot, fields = AM_CONFIG_FIELDS, {
       localSave = false, localAccepted = null
     } = {}) {
-      if (previous === null || previous === undefined) {
+      if (previous === null || previous === undefined ||
+          (snapshot?.status === "ready" && priorSnapshot?.status !== "ready")) {
         return { values: configValuesFromSnapshot(snapshot, fields), conflict: false, clearLocal: false };
       }
       const accepted = (snapshot && snapshot.value) || {};
@@ -7085,7 +7086,7 @@ window.__ModuleLoader__.load({
                       ...personaDraft,
                       byAgent: { ...personaDraft.byAgent, [agentId]: { ...card, enabled: event.target.checked } }
                     })
-                  }), t("memory.personalization.enabled"))))))),
+                  }), t("memory.personalization.enabled")))))),
           h("div", { className: "mneme-set-row", style: { border: "none", padding: 0, gap: 8, flexWrap: "wrap" } },
             h("button", { className: "mneme-btn", disabled: personalizationBusy || !personaDraft, onClick: async () => {
               setPersonalizationBusy(true); setPersonalizationError(""); setPersonalizationSaved("");
@@ -7136,7 +7137,7 @@ window.__ModuleLoader__.load({
                   } catch (error) { setAclError(String(error.message || error)); }
                   finally { setAclBusy(false); }
                 } }, t("memory.explorer.grant"))),
-              h("div", { className: "mneme-set-hint", style: { marginTop: 6 } }, `${t("memory.explorer.bot")}: ${aclEffectiveBot || "—"} · ${aclDirection()}`))),
+              h("div", { className: "mneme-set-hint", style: { marginTop: 6 } }, `${t("memory.explorer.bot")}: ${aclEffectiveBot || "—"} · ${aclDirection()}`)))),
 
         panelTab === "settings" && settingsPage === "general" && h("div", { role: "tabpanel", "aria-label": t("memory.am.settings.general") },
         h("div", { className: "mneme-set-grouphead" }, t("memory.am.section.core")),
@@ -13255,6 +13256,9 @@ window.__ModuleLoader__.load({
     return module.exports;
   }
 });
+
+
+
 
 
 

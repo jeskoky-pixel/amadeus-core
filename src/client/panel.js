@@ -14,21 +14,21 @@ const CSS=`.amadeus-core-shell{font:14px/1.6 system-ui,sans-serif;min-width:0;co
 @media(prefers-color-scheme:dark){.amadeus-core-shell{color:var(--dsw-alias-label-primary,#dceae3)}.core-dialog{background:var(--dsw-alias-bg-layer-1,#192722)}}`;
 const ROOT='/api/amadeus-core';
 async function api(path,body){const r=await fetch(ROOT+path,{method:body?'POST':'GET',credentials:'same-origin',headers:body?{'content-type':'application/json','x-amadeus-core':'1'}:{},...(body?{body:JSON.stringify(body)}:{})});const j=await r.json();if(!r.ok||!j.ok)throw Error(j.error||'Request failed');return j.data;}
-function forms(){const cache=new Map();return {whileServed:(_keys,fn)=>fn(),get(id){
+function forms(){const cache=new Map(),changes=new Set();return {subscribeChanges:fn=>{changes.add(fn);return()=>changes.delete(fn)},refreshAll:()=>Promise.all([...cache.values()].map(f=>f.refresh())),whileServed:(_keys,fn)=>fn(),get(id){
  const key=String(id).replace(/^amadeus-/,'').replace('dsh-mneme','memory');
  if(cache.has(key))return cache.get(key);
  let snapshot={status:'loading',writable:false},listeners=new Set();
  const notify=()=>listeners.forEach(fn=>fn());
  const refresh=async()=>{try{snapshot=await api('/forms/'+key)}catch(e){snapshot={status:'unavailable',writable:false,error:e.message}}notify()};
- const form={getSnapshot:()=>snapshot,subscribe:fn=>{listeners.add(fn);return()=>listeners.delete(fn)},mutate:async(ops,revision)=>{try{snapshot=await api('/forms/'+key,{ops,revision});notify();return true}catch(e){await refresh();throw e}},refresh};
+ const form={getSnapshot:()=>snapshot,subscribe:fn=>{listeners.add(fn);return()=>listeners.delete(fn)},mutate:async(ops,revision)=>{try{snapshot=await api('/forms/'+key,{ops,revision});notify();changes.forEach(fn=>fn());return true}catch(e){await refresh();throw e}},refresh};
  cache.set(key,form);refresh();return form;
 }};}
 const tabs=[['overview','总览','Overview'],['persona','人格','Persona'],['memory','记忆','Memory'],['state','状态','State'],['life','生活','Life'],['platforms','平台','Platforms'],['mcp','MCP','MCP'],['experiences','经历','Experiences'],['settings','设置','Settings']];
-function CorePanel({ctx,views}){
+function CorePanel({ctx,views,formsService}){
  const [tab,setTab]=useState('overview'),[status,setStatus]=useState(null),[error,setError]=useState(''),[workspace,setWorkspace]=useState(''),[busy,setBusy]=useState(false),[english,setEnglish]=useState(false);
  const [sources,setSources]=useState({memory:'',life:'',state:'',persona:''}),[offlineConfirmed,setOfflineConfirmed]=useState(false);
  const refresh=()=>api('/status').then(setStatus).catch(e=>setError(e.message));
- useEffect(()=>{refresh()},[]);
+ useEffect(()=>{refresh();return formsService?.subscribeChanges(refresh)},[formsService]);
  useEffect(()=>{if(status?.workspaceId)setWorkspace(status.workspaceId)},[status?.workspaceId]);
  async function action(fn){setBusy(true);setError('');try{await fn();await refresh()}catch(e){setError(e.message)}finally{setBusy(false)}}
  const t=(zh,en)=>english?en:zh;
@@ -65,13 +65,13 @@ function CorePanel({ctx,views}){
  h('header',{style:{display:'flex',gap:12,alignItems:'center'}},h('h2',null,'Amadeus Core'),h('button',{onClick:()=>setEnglish(!english)},english?'中文':'English'),h('button',{onClick:refresh},t('刷新','Refresh'))),
  h('nav',{style:{display:'flex',flexWrap:'wrap',gap:6,marginBottom:18}},...tabs.map(([id,zh,en])=>h('button',{key:id,'aria-pressed':tab===id,onClick:()=>setTab(id)},english?en:zh))),
  error||status?.problem?h('div',{role:'alert'},error||status.problem):null,
- status?.pendingRestart?h('div',{style:{padding:12,border:'1px solid #8a9d9a55',marginBottom:12}},t('保存的配置尚未应用。','Saved configuration is not active yet.'),h('button',{disabled:busy,onClick:()=>action(()=>api('/apply',{}))},t('应用配置','Apply configuration'))):null,
+ status?.pendingRestart?h('div',{style:{padding:12,border:'1px solid #8a9d9a55',marginBottom:12}},t('保存的配置尚未应用。','Saved configuration is not active yet.'),h('button',{disabled:busy,onClick:()=>action(async()=>{await api('/apply',{});await formsService?.refreshAll()})},t('应用配置','Apply configuration'))):null,
  h('main',null,content));
 }
-function CoreLauncher({ctx,views}){
+function CoreLauncher({ctx,views,formsService}){
  const [open,setOpen]=useState(false);
  useEffect(()=>{if(!open)return;const old=document.activeElement,fn=e=>{if(e.key==='Escape')setOpen(false)};document.addEventListener('keydown',fn);return()=>{document.removeEventListener('keydown',fn);old?.focus?.()}},[open]);
- return h('div',null,h('button',{type:'button',onClick:()=>setOpen(true),style:{font:'inherit',padding:'8px 12px',borderRadius:10,border:'1px solid #78978d55',background:'transparent',color:'inherit'}},'Amadeus Core'),open?createPortal(h('div',{className:'core-overlay'},h('style',null,CSS),h('div',{className:'core-dialog',role:'dialog','aria-modal':true,'aria-label':'Amadeus Core'},h('button',{className:'core-close',onClick:()=>setOpen(false)},'关闭 / Close'),h(CorePanel,{ctx,views}))),document.body):null);
+ return h('div',null,h('button',{type:'button',onClick:()=>setOpen(true),style:{font:'inherit',padding:'8px 12px',borderRadius:10,border:'1px solid #78978d55',background:'transparent',color:'inherit'}},'Amadeus Core'),open?createPortal(h('div',{className:'core-overlay'},h('style',null,CSS),h('div',{className:'core-dialog',role:'dialog','aria-modal':true,'aria-label':'Amadeus Core'},h('button',{className:'core-close',onClick:()=>setOpen(false)},'关闭 / Close'),h(CorePanel,{ctx,views,formsService}))),document.body):null);
 }
 return {inject:['slots','locale','configForms'],apply(ctx){
  const views={},configForms=forms();
@@ -85,6 +85,7 @@ return {inject:['slots','locale','configForms'],apply(ctx){
   module.apply(scoped);
   if(n==='memory')views.memory=()=>module.coreView(scoped);
  }
- ctx.slots.inject('settings.section',()=>ctx.slots.register({name:'settings.section',id:'amadeus-core',order:23,label:()=> 'Amadeus Core'},()=>h(CorePanel,{ctx,views})));
- ctx.slots.inject('sidebar.footer.action',()=>ctx.slots.register({name:'sidebar.footer.action',id:'amadeus-core',order:5,label:()=> 'Amadeus Core'},()=>h(CoreLauncher,{ctx,views})));
+ ctx.slots.inject('settings.section',()=>ctx.slots.register({name:'settings.section',id:'amadeus-core',order:23,label:()=> 'Amadeus Core'},()=>h(CorePanel,{ctx,views,formsService:configForms})));
+ ctx.slots.inject('sidebar.footer.action',()=>ctx.slots.register({name:'sidebar.footer.action',id:'amadeus-core',order:5,label:()=> 'Amadeus Core'},()=>h(CoreLauncher,{ctx,views,formsService:configForms})));
 }};
+

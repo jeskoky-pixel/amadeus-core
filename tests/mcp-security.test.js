@@ -21,3 +21,19 @@ test('config rejects shell invocation, URL credentials and undeclared raw secret
  assert.throws(()=>validateServer({...cfg,transport:'streamable-http',url:'https://u:p@example.test/mcp'}),/URL/);
  assert.throws(()=>validateServer({...cfg,token:'not-allowed'}),/UNKNOWN_FIELD/);
 });
+
+test('QQ type grants are bulk grants, exact Session grants remain isolated and revocable',t=>{
+ const {m,runtime,ws}=setup(t);ws.sessionIds=['group-a','group-b','owner-private','nonowner-private','ordinary'];
+ runtime.ctx.qq={sessionProvenanceVersion:1,classifySession:id=>({kind:id==='ordinary'?'ordinary':'qq'}),resolveTrustedSessionScene:id=>({platform:'qq',kind:id.startsWith('group')?'group':'private',verified:true,admin:id==='owner-private'})};
+ const closed={...cfg,sessionTypes:[],sessionIds:[]};
+ for(const id of ws.sessionIds)assert.throws(()=>m.allowed(closed,'echo',id),/DENIED/);
+ const exact={...closed,sessionIds:['group-a']};m.allowed(exact,'echo','group-a');assert.throws(()=>m.allowed(exact,'echo','group-b'),/DENIED/);
+ exact.sessionIds=[];assert.throws(()=>m.allowed(exact,'echo','group-a'),/DENIED/);
+ const groups={...closed,sessionTypes:['qq-group']};for(const id of ['group-a','group-b'])m.allowed(groups,'echo',id);
+ const privates={...closed,sessionTypes:['qq-private']};for(const id of ['owner-private','nonowner-private'])m.allowed(privates,'echo',id);
+ assert.throws(()=>m.allowed(privates,'echo','group-a'),/DENIED/);
+ assert.throws(()=>m.allowed(groups,'echo','owner-private'),/DENIED/);
+ ws.sessionIds.push('group-future');m.allowed(groups,'echo','group-future');
+ assert.throws(()=>m.allowed(groups,'echo','outside-workspace'),/SESSION_DENIED/);
+ runtime.ctx.qq.resolveTrustedSessionScene=()=>({platform:'qq',kind:'group',verified:false});assert.throws(()=>m.allowed(groups,'echo','group-a'),/IDENTITY/);
+});
