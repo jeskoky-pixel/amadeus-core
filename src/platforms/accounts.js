@@ -19,7 +19,20 @@ export class AccountManager {
   invalidate(id){this.#epochs.set(id,this.epoch(id)+1);this.#pending.delete(id);for(const [k,s] of this.#secrets)if(s.platformId===id)this.#secrets.delete(k);}
   persist(){atomicJson(this.file,this.state);}
   list(id){return this.state.accounts.filter(a=>a.platformId===id&&a.workspaceId===this.workspaceId()).map(a=>({...a,status:a.expiresAt<=this.now()?'credentials_expired':a.status}));}
-  status(id){const p=this.#pending.get(id);return {storage:'session-only',canRefresh:!!this.context(id,{allowExpired:true})?.credentials?.refreshToken,accounts:this.list(id),pending:p?{...p.public,loginId:p.loginId}:null};}
+  status(id){const p=this.#pending.get(id);return {storage:this.#adapters.get(id)?.storage??'session-only',hasSavedLogin:this.#adapters.get(id)?.hasSavedLogin?.()??false,canRefresh:!!this.context(id,{allowExpired:true})?.credentials?.refreshToken,accounts:this.list(id),pending:p?{...p.public,loginId:p.loginId}:null};}
+  async ensure(id){
+    if(this.context(id))return;
+    const adapter=this.#adapters.get(id),workspaceId=this.workspaceId(),epoch=this.epoch(id);
+    const row=this.state.accounts.find(a=>a.platformId===id&&a.workspaceId===workspaceId&&a.status==='credentials_expired');
+    if(!row||!adapter?.restoreLogin)return;
+    const result=await adapter.restoreLogin({accountId:row.accountId});
+    if(epoch!==this.epoch(id)||workspaceId!==this.workspaceId())fail('REVOKED');
+    if(result.identity?.accountId!==row.accountId)fail('IDENTITY_MISMATCH');
+    this.#secrets.set(JSON.stringify([workspaceId,id,row.accountId]),{platformId:id,credentials:result.credentials});row.status='authenticated';row.expiresAt=result.expiresAt;this.persist();
+  }
+  async restore(){for(const id of this.#adapters.keys()){try{await this.ensure(id);}catch{/* UI shows expired; user can reconnect. */}}}
+  async saveLogin(id,input){const adapter=this.#adapters.get(id);if(!adapter?.saveLoginDetails)fail('UNSUPPORTED');await adapter.saveLoginDetails(input);return this.status(id);}
+  clearLogin(id){const adapter=this.#adapters.get(id);if(!adapter?.clearLoginDetails)fail('UNSUPPORTED');adapter.clearLoginDetails();return this.status(id);}
   async begin(id,input={}) {
     const adapter=this.#adapters.get(id);if(!adapter?.beginLogin)fail('UNSUPPORTED');
     const workspaceId=this.workspaceId();if(!workspaceId)fail('WORKSPACE_REQUIRED');
@@ -59,6 +72,7 @@ export class AccountManager {
     return secret?{accountId:a.accountId,credentials:secret.credentials,epoch:this.epoch(id)}:null;
   }
   async verify(id,{refresh=false}={}) {
+    await this.ensure(id);
     const c=this.context(id,{allowExpired:refresh}),epoch=this.epoch(id);if(!c)fail('LOGIN_REQUIRED');
     try {
       const adapter=this.#adapters.get(id);

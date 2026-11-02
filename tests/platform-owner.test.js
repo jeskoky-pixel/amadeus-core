@@ -17,6 +17,11 @@ test('Owner HTTP login lifecycle is marked, secret-free, cancellable and revisio
  const call=async(body,headers={})=>{const res=await fetch(`http://127.0.0.1:${server.address().port}/api/amadeus-core/platform/account`,{method:'POST',headers:{'content-type':'application/json','x-amadeus-core':'1',...headers},body:JSON.stringify(body)});return {status:res.status,...await res.json()};};
  assert.equal((await call({id:'bilibili',action:'begin',revision:1},{'x-test-owner':'no'})).status,403);
  assert.equal((await call({id:'bilibili',action:'begin',revision:1},{'x-amadeus-core':''})).status,403);
+ let saved=null;r.accounts.register({id:'xiaohongshu-browser',saveLoginDetails:async input=>{saved=input;},clearLoginDetails:()=>{saved=null;},hasSavedLogin:()=>!!saved});
+ const loginBody={id:'xiaohongshu-browser',action:'save-login',options:{account:'synthetic',password:'synthetic-private-password'}};
+ assert.equal((await call(loginBody,{'x-test-owner':'no'})).status,403);assert.equal(saved,null);
+ const savedReply=await call(loginBody);assert.equal(savedReply.ok,true);assert.equal(savedReply.data.hasSavedLogin,true);assert.ok(!JSON.stringify(savedReply).includes('synthetic-private-password'));
+ assert.equal((await call({id:'xiaohongshu-browser',action:'clear-login'})).data.hasSavedLogin,false);assert.equal(saved,null);
  const begin=await call({id:'bilibili',action:'begin',revision:1});assert.equal(begin.ok,true);assert.ok(begin.data.pending.qrDataUrl.startsWith('data:image/png;'));
  assert.ok(!JSON.stringify(begin).includes('synthetic-private'));
  assert.equal((await call({id:'bilibili',action:'poll',loginId:'wrong'})).ok,false);

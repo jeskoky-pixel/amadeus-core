@@ -1,4 +1,4 @@
-# Amadeus Core 0.2.0-alpha.1
+# Amadeus Core 0.2.0-alpha.2
 
 开发候选，尚未发布。一个 DSH Bundle 内保留 Memory 1.3.0、Life 1.2.1、State 1.2.0、Persona 1.2.0 的实现与数据结构；QQ 继续独立。
 
@@ -20,7 +20,7 @@
 
 Bilibili 已实现网页端扫码客户端和元数据/热门/搜索/评论/相关内容请求；公开视频详情已做一次无账号只读验证。网页接口不是开放平台 OAuth，仍需用户本人登录联调，不保证所有账号/接口持续可用。小红书使用官方 Web 设备授权，需要审核通过的应用；当前官方仅开放 basic_info，笔记搜索/评论/发布不支持。两平台真实写操作均关闭。
 
-凭据仅在 Host 内存中保存，重启后重新登录；不会读取日常浏览器 Cookie。Mock 使用独立身份，不继承真实账号、权限或预算。MCP 保持独立。QQ 仍只保留此前合成 OneBot 契约证据，未连接生产 NapCat。
+小红书专用浏览器使用 Windows 当前用户加密存储登录状态，关闭窗口或重启后尝试恢复，平台失效时重新扫码／短信登录。可选保存账密，只在官方页面提供密码框时预填，不自动提交验证码。Bilibili 和开放平台适配器目前仍为会话内凭据，重启需重新授权；不会读取日常浏览器 Cookie。Mock 使用独立身份，不继承真实账号、权限或预算。MCP 保持独立。QQ 仍只保留此前合成 OneBot 契约证据，未连接生产 NapCat。
 
 [登录指南](docs/architecture/AMADEUS_PLATFORM_LOGIN_GUIDE.md) · [Alpha 0.2 验收](docs/architecture/AMADEUS_REAL_PLATFORM_TEST_REPORT.md)。本轮只交付 Draft PR，不合并、不发布、不替换日常 DSH。
 

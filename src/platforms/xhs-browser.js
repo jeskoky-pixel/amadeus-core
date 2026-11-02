@@ -239,11 +239,11 @@ function sourceUrl(noteId) {
   return `${ORIGIN}/explore/${noteId}`;
 }
 
-export function makeXhsBrowserAdapter({ launch, now = () => Date.now() } = {}) {
+export function makeXhsBrowserAdapter({ launch, vault=null, now = () => Date.now() } = {}) {
   if (launch === undefined) {
-    launch = async function defaultLaunch() {
+    launch = async function defaultLaunch({headless=false}={}) {
       const { chromium } = await import('playwright-core');
-      return chromium.launch({ channel: 'msedge', headless: false });
+      return chromium.launch({ channel: 'msedge', headless });
     };
   }
   if (typeof launch !== 'function') fail('LAUNCH');
@@ -255,6 +255,7 @@ export function makeXhsBrowserAdapter({ launch, now = () => Date.now() } = {}) {
   let activePage = null;
   let disposed = false;
   let lifecycle=0;
+  let restoring=null;
 
   function closePageQuietly(page) {
     if (page && typeof page.close === 'function') {
@@ -330,14 +331,15 @@ export function makeXhsBrowserAdapter({ launch, now = () => Date.now() } = {}) {
     if (!match || match[1].toLowerCase() !== noteId) fail('TARGET_MISMATCH');
   }
 
-  async function readSelf(page) {
+  async function readSelf(page,navigate=false) {
     // Let the website make its own authenticated/signed request. Do not forge
     // private API signatures or infer identity from the note author's profile.
+    const fresh=new WeakSet(),track=request=>fresh.add(request);page.on('request',track);
     const response=page.waitForResponse(r=>{
-      try{const u=new URL(r.url());return SELF_ORIGINS.has(u.origin)&&u.pathname===SELF_PATH;}catch{return false;}
+      try{const u=new URL(r.url());return fresh.has(r.request())&&SELF_ORIGINS.has(u.origin)&&u.pathname===SELF_PATH;}catch{return false;}
     },{timeout:10000}).catch(()=>null);
-    try{await page.reload({waitUntil:'domcontentloaded',timeout:15000});}catch{return null;}
-    const r=await response;if(!r)return null;
+    try{if(navigate)await page.goto(LOGIN_URL,{waitUntil:'domcontentloaded',timeout:15000});else await page.reload({waitUntil:'domcontentloaded',timeout:15000});}catch{page.off?.('request',track);return null;}
+    const r=await response;page.off?.('request',track);if(!r)return null;
     try{return parseSelfResult({status:r.status(),body:await r.json()});}catch(e){if(isSafeError(e))throw e;return null;}
   }
 
@@ -552,6 +554,56 @@ export function makeXhsBrowserAdapter({ launch, now = () => Date.now() } = {}) {
     };
   }
 
+  async function checkpoint(session){
+    if(!vault)return;
+    const epoch=lifecycle;
+    const storageState=await session.context.storageState();
+    if(epoch!==lifecycle||session.invalidated)fail('REVOKED');
+    await vault.save({accountId:session.accountId,displayName:session.displayName,storageState});
+    if(epoch!==lifecycle)fail('REVOKED');
+  }
+  async function resumeSaved(expectedAccountId){
+    if(!vault)fail('LOGIN_REQUIRED');
+    const epoch=lifecycle,saved=await vault.read();
+    if(!saved?.storageState||saved.accountId!==expectedAccountId)fail('LOGIN_REQUIRED');
+    let nextBrowser;
+    try{
+      nextBrowser=await launch({headless:true});
+      const context=await nextBrowser.newContext({storageState:saved.storageState});
+      const page=await context.newPage();
+      const identity=await readSelf(page,true);
+      if(!identity||identity.accountId!==expectedAccountId)fail('LOGIN_REQUIRED');
+      if(epoch!==lifecycle||disposed)fail('REVOKED');
+      const session={handle:randomUUID(),accountId:identity.accountId,displayName:identity.displayName,browser:nextBrowser,context,page,expiresAt:now()+SESSION_TTL_MS,invalidated:false};
+      browser=nextBrowser;sessions.set(session.handle,session);return session;
+    }catch(e){await nextBrowser?.close().catch(()=>{});if(isSafeError(e))throw e;fail('LOGIN_REQUIRED');}
+  }
+  async function ensureSession(credentials){
+    if(!credentials||typeof credentials.sessionHandle!=='string')fail('INVALID_CREDENTIALS');
+    const old=sessions.get(credentials.sessionHandle);
+    if(old&&!old.invalidated&&old.accountId===credentials.accountId&&browserConnected(old.browser)&&!old.page.isClosed?.())return;
+    if(old&&old.accountId!==credentials.accountId)return;
+    if(!old||old.invalidated)fail('LOGIN_REQUIRED');
+    if(!restoring)restoring=resumeSaved(credentials.accountId).finally(()=>{restoring=null;});
+    const next=await restoring;sessions.set(credentials.sessionHandle,next);
+  }
+  async function saveLoginDetails(input){
+    if(!vault)fail('SECURE_STORAGE_UNAVAILABLE');
+    if(!isRecord(input)||typeof input.account!=='string'||!input.account.trim()||input.account.length>256||typeof input.password!=='string'||input.password.length>1024)fail('INPUT');
+    await vault.save({account:input.account,password:input.password},'login');return {saved:true};
+  }
+  async function prefillLogin(page){
+    if(!vault)return;
+    const saved=await vault.read('login');if(!saved)return;
+    // Only recognizable website-owned account/password fields, never SMS,
+    // OTP or CAPTCHA fields. No automated submission or invented login flow.
+    const account=page.locator('input[autocomplete="username"],input[name="username"]');
+    const password=page.locator('input[type="password"]');
+    if(await account.count()===1&&await password.count()===1&&await account.isVisible()&&await password.isVisible()){
+      await account.fill(saved.account);await password.fill(saved.password);
+    }
+  }
+
   async function beginLoginImpl(input, options) {
     if (!isRecord(input) || input.acceptBrowser !== true) fail('PERMISSION_REQUIRED');
     const { signal } = requireOptions(options);
@@ -616,6 +668,7 @@ export function makeXhsBrowserAdapter({ launch, now = () => Date.now() } = {}) {
       if(epoch!==lifecycle||disposed)fail('REVOKED');
       throwIfAborted(signal);
       await assertNoChallenge(page, { allowLogin: true });
+      await prefillLogin(page);
       return {
         private: { generation: state.generation },
         public: {
@@ -686,6 +739,7 @@ export function makeXhsBrowserAdapter({ launch, now = () => Date.now() } = {}) {
     pending.identity = identity;
     pending.handle = handle;
     sessions.set(handle, session);
+    await checkpoint(session);
     return sessionResult(session);
   }
 
@@ -725,6 +779,7 @@ export function makeXhsBrowserAdapter({ launch, now = () => Date.now() } = {}) {
     if (operation === 'reply') commentId = subjectId(input.commentId);
     if (operation === 'like' && input.liked !== true) fail('INPUT');
 
+    await ensureSession(credentials);
     const session = requireSession(credentials);
     throwIfAborted(signal);
     await requireLiveIdentity(session.page,session);
@@ -782,6 +837,7 @@ export function makeXhsBrowserAdapter({ launch, now = () => Date.now() } = {}) {
   async function validateImpl(credentials, options) {
     const { signal } = requireOptions(options);
     throwIfAborted(signal);
+    await ensureSession(credentials);
     const session = requireSession(credentials);
     const identity = await readSelf(session.page);
     if (!identity) {
@@ -805,6 +861,7 @@ export function makeXhsBrowserAdapter({ launch, now = () => Date.now() } = {}) {
       if (typeof handle !== 'string' || handle.length < 1 || handle.length > 128) fail('INVALID_CREDENTIALS');
     }
     requireOptions(options);
+    vault?.clear();
     await closeEverything();
     return { loggedOut: true };
   }
@@ -826,12 +883,17 @@ export function makeXhsBrowserAdapter({ launch, now = () => Date.now() } = {}) {
 
   return Object.freeze({
     ...METADATA,
+    storage: vault?'os-protected':'session-only',
+    hasSavedLogin:()=>vault?.has('login')??false,
+    saveLoginDetails,
+    clearLoginDetails:()=>{vault?.clear('login');return {saved:false};},
+    restoreLogin: vault?async({accountId})=>sessionResult(await resumeSaved(accountId)):undefined,
     capabilities: METADATA.capabilities,
     authMethods: METADATA.authMethods,
     beginLogin: (input, options) => guard('LAUNCH', () => beginLoginImpl(input, options)),
     pollLogin: (privateState, options) => guard('LOGIN_MISSING', () => pollLoginImpl(privateState, options)),
     validateAccount: (credentials, options) => guard('INVALID_CREDENTIALS', () => validateImpl(credentials, options)),
-    execute: (operation, input, options) => guard('ACTION_UNKNOWN', () => executeImpl(operation, input, options)),
+    execute: (operation, input, options) => guard('ACTION_UNKNOWN', async () => {const result=await executeImpl(operation,input,options);const session=sessions.get(options?.credentials?.sessionHandle);if(session)await checkpoint(session);return result;}),
     logout: (credentials, options) => guard('INVALID_CREDENTIALS', () => logoutImpl(credentials, options)),
     dispose: () => guard('ACTION_UNKNOWN', () => disposeImpl()),
   });

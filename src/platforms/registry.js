@@ -58,6 +58,7 @@ export class PlatformRegistry {
       const writing=!e.adapter.simulated&&PLATFORM_SOCIAL.includes(operation);
       if(writing&&e.adapter.socialWrites!==true)throw Error('CORE_PLATFORM_UNSUPPORTED');
       const actionInput=writing?socialInput(operation,input):null;
+      if(!e.adapter.simulated)await this.accounts?.ensure?.(id);
       const account=e.adapter.simulated?null:this.accounts?.context(id),accountEpoch=this.accounts?.epoch(id);
       if((e.adapter.requiresAccount||writing)&&!account)throw Error('CORE_PLATFORM_LOGIN_REQUIRED');
       this.refreshBudget();

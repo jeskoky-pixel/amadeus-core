@@ -11,6 +11,7 @@ import { CoreStore, MODULES, atomicJson } from './store.js';
 import { acquireLease, legacyConflicts, installLegacyGuard } from './ownership.js';
 import { host, member, assertIdle } from './host.js';
 import { AccountManager } from '../platforms/accounts.js';
+import {BrowserVault} from '../platforms/browser-vault.js';
 import {makeXhsBrowserAdapter} from '../platforms/xhs-browser.js';
 import {socialPolicy} from '../platforms/social-journal.js';
 import {makeBilibiliAdapter} from '../platforms/bilibili.js';
@@ -48,7 +49,7 @@ export class CoreRuntime {
     this.activeConfigs={};
     this.runningRevision = null; this.tail = Promise.resolve();
     this.accounts=new AccountManager({file:path.join(root,'platform-accounts.json'),workspaceId:()=>this.store.state.workspaceId});
-    const real=[makeXhsBrowserAdapter(),makeBilibiliAdapter(),makeXiaohongshuAdapter({transport:createPlatformTransport({allowedOrigins:['https://openaccount.xiaohongshu.com']})})];
+    const real=[makeXhsBrowserAdapter({vault:new BrowserVault({root:path.join(root,'browser-vault'),workspaceId:()=>this.store.state.workspaceId})}),makeBilibiliAdapter(),makeXiaohongshuAdapter({transport:createPlatformTransport({allowedOrigins:['https://openaccount.xiaohongshu.com']})})];
     this.platforms=new PlatformRegistry({budgetFile:path.join(root,'platform-budget.json'),journalFile:path.join(root,'platform-actions.json'),trustedRealAdapters:real,accounts:this.accounts,authorizeIdentity:identity=>member(this.ctx,this.store.state.workspaceId===identity?.workspaceId?identity.workspaceId:null,identity?.sessionId)});
     for(const adapter of real){this.accounts.register(adapter);this.platforms.register(adapter);}
     this.platforms.register(makeBilibiliMock());this.platforms.register(makeXiaohongshuMock());
@@ -64,6 +65,7 @@ export class CoreRuntime {
       this.removeLegacyGuard=installLegacyGuard(this.ctx,()=>!!this.release);
       await this.mount();
       await this.mcp.start();
+      await this.accounts.restore();
     } catch (e) { this.status = 'blocked'; this.ctx.logger?.error?.('Core mount failed', this.mountingModule, e); atomicJson(path.join(this.root,'last-error.private.json'),{module:this.mountingModule,message:e.message,stack:e.stack}); this.problem = 'CORE_MOUNT_FAILED: ' + (this.mountingModule ?? 'runtime'); await this.stopModules(); }
   }
   async stopModules() {
@@ -160,6 +162,8 @@ export class CoreRuntime {
     switch(input.action){
       case 'begin':return this.accounts.begin(id,input.options);
       case 'poll':return this.accounts.poll(id,input.loginId);
+      case 'save-login':return this.accounts.saveLogin(id,input.options);
+      case 'clear-login':return this.accounts.clearLogin(id);
       case 'verify':return this.accounts.verify(id);
       case 'refresh':return this.accounts.verify(id,{refresh:true});
       case 'logout':return this.accounts.logout(id);
@@ -248,7 +252,7 @@ export class CoreRuntime {
     });
   }
   overview() {
-    return { version: '0.2.0-alpha.1', status: this.status, problem: this.problem,
+    return { version: '0.2.0-alpha.2', status: this.status, problem: this.problem,
       workspaceId: this.store.state.workspaceId, revision: this.store.state.revision,
       runningRevision: this.runningRevision, pendingRestart: this.store.state.revision !== this.runningRevision,
       modules: Object.fromEntries(MODULES.map(n => [n, { enabled: this.store.state.modules[n].enabled, mounted: this.handles.has(n) }])),

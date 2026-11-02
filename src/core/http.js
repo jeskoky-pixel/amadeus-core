@@ -1,3 +1,5 @@
+import fs from 'node:fs';
+const personaEmbedCss=fs.readFileSync(new URL('../client/persona-embed.css',import.meta.url));
 import { sameOrigin, authorizeRequest } from '../modules/life/src/http.js';
 const PREFIX = '/api/amadeus-core';
 function send(res, code, data) {
@@ -18,6 +20,7 @@ export function createCoreHandler(ctx, runtime) {
     if (!auth.ok) return send(res, auth.status, { ok: false, error: 'CORE_OWNER_REQUIRED' });
     const pathname = new URL(req.url, 'http://localhost').pathname;
     try {
+      if(req.method==='GET'&&pathname===PREFIX+'/persona-embed.css'){res.writeHead(200,{'content-type':'text/css; charset=utf-8','cache-control':'no-store','x-content-type-options':'nosniff'});return res.end(personaEmbedCss);}
       if (req.method === 'GET' && pathname === PREFIX + '/status') return send(res, 200, { ok: true, data: runtime.overview() });
       const form = pathname.match(/^\/api\/amadeus-core\/forms\/(life|state|memory)$/);
       if (req.method === 'GET' && form) return send(res, 200, { ok: true, data: runtime.form(form[1]) });

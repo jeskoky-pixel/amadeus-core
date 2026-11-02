@@ -1,0 +1,1 @@
+body{font-family:inherit;background:var(--bg)}.app{grid-template-columns:200px minmax(0,1fr)}.sidebar{padding:16px 12px}.main{padding:22px}[data-action=theme]{display:none!important}@media(max-width:700px){.app{grid-template-columns:1fr}.sidebar{height:auto;position:static}.main{padding:16px}}
