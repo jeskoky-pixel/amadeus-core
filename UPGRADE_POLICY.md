@@ -10,3 +10,6 @@ Before a release, test previous stable version → synthetic populated data → 
 
 
 Alpha 0.1 → 0.2 is additive: Core schema 1 and all four module schemas remain unchanged. New platform-accounts.json schema 1 stores only account metadata; credentials/pending grants are memory-only. Existing Mock grants never enable real adapters. Optional platform cooldown/autonomy fields default safely. Older Core ignores new account metadata; preserve the full Core data directory and previous package before downgrade. Account login must be repeated after restart.
+
+
+Dedicated XHS browser addendum: module schemas are unchanged. Additive `platform-actions.json` schema 1 stores hashed semantic action IDs, platform/account/Workspace/Session/note identities, timestamps and pending/confirmed/unknown outcomes; it stores no comment bodies, URL security tokens or browser credentials. Preserve it with `platform-budget.json` and `core.json` during backup and restore. Pending reservations after restart are treated as unknown and cannot replay. Never delete this journal to retry a send. Account contexts are ephemeral and require login again. Old versions do not execute this new adapter; keep the journal if downgrading. Disabling/uninstalling Core must preserve these files. Optional per-platform social configuration starts with empty note/Session grants.

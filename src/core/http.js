@@ -36,6 +36,7 @@ export function createCoreHandler(ctx, runtime) {
       else if (pathname === PREFIX + '/mcp/secret') data = await runtime.serial(()=>({reference:runtime.mcp.store.secret(body.value)}));
       else if (pathname === PREFIX + '/platform/configure') data = await runtime.savePlatform(body);
       else if (pathname === PREFIX + '/platform/account') data = await runtime.accountAction(body);
+      else if (pathname === PREFIX + '/platform/action') data = await runtime.platformAction(body);
       else if (pathname === PREFIX + '/platform/read') data = await runtime.platformRead(body);
       else if (pathname === PREFIX + '/platform/dry-run') data = await runtime.dryRunPlatform(body);
       else if (pathname === PREFIX + '/import') data = await runtime.importData(body);

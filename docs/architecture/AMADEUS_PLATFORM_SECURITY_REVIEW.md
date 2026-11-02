@@ -1,3 +1,5 @@
+> 2026-11-03 addendum: [dedicated XHS browser candidate, safety contract and current evidence](XHS_BROWSER_ACCEPTANCE.md). Statements below that all social writes are unsupported describe the prior device-auth/read-only baseline. Bilibili and official XHS OAuth remain read-only/identity-only.
+
 # Alpha 0.2 security review
 - Remote content cannot register adapters, change mode, grant permissions, assert identity or mint live-read receipts. Result text is marked untrusted and never executed/rendered as HTML.
 - Owner-only HTTP checks are retained. No secrets reach overview, model observations, Memory, logs or ordinary config exports. QR public data is short-lived and excluded from evidence screenshots.

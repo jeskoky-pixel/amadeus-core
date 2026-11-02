@@ -1,3 +1,5 @@
+> 2026-11-03 addendum: [dedicated XHS browser candidate, safety contract and current evidence](XHS_BROWSER_ACCEPTANCE.md). Statements below that all social writes are unsupported describe the prior device-auth/read-only baseline. Bilibili and official XHS OAuth remain read-only/identity-only.
+
 # Real platform architecture — Alpha 0.2
 Core remains one modular Bundle; QQ stays independent. No changes to the four retained module algorithms or MCP implementation.
 

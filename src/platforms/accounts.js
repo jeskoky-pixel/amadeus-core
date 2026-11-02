@@ -23,16 +23,16 @@ export class AccountManager {
   async begin(id,input={}) {
     const adapter=this.#adapters.get(id);if(!adapter?.beginLogin)fail('UNSUPPORTED');
     const workspaceId=this.workspaceId();if(!workspaceId)fail('WORKSPACE_REQUIRED');
-    this.invalidate(id);const epoch=this.epoch(id);
+    this.invalidate(id);const epoch=this.epoch(id);await this.#adapters.get(id)?.logout?.();if(epoch!==this.epoch(id))fail('REVOKED');
     for(const a of this.state.accounts)if(a.platformId===id&&a.workspaceId===workspaceId)a.status='disabled';this.persist();
     const result=await adapter.beginLogin(input,{});
     if(epoch!==this.epoch(id))fail('REVOKED');
     const pub=result.public;
     if(!pub||!Number.isFinite(pub.expiresAt)||pub.expiresAt<=this.now()||typeof pub.verificationUrl!=='string')fail('INVALID_RESPONSE');
     const loginId=randomUUID();
-    const qrDataUrl=await QRCode.toDataURL(pub.verificationUrl,{width:240,margin:2});
+    const qrDataUrl=pub.method==='dedicated-browser'?null:await QRCode.toDataURL(pub.verificationUrl,{width:240,margin:2});
     if(epoch!==this.epoch(id))fail('REVOKED');
-    this.#pending.set(id,{private:result.private,public:{qrDataUrl,verificationUrl:pub.verificationUrl,userCode:pub.userCode??null,expiresAt:pub.expiresAt,intervalMs:Math.max(1000,pub.intervalMs??2000)},workspaceId,loginId,nextPoll:0});
+    this.#pending.set(id,{private:result.private,public:{method:pub.method??null,qrDataUrl,verificationUrl:pub.verificationUrl,userCode:pub.userCode??null,expiresAt:pub.expiresAt,intervalMs:Math.max(1000,pub.intervalMs??2000)},workspaceId,loginId,nextPoll:0});
     return this.status(id);
   }
   async poll(id,loginId) {
@@ -72,6 +72,7 @@ export class AccountManager {
   }
   logout(id,{clear=false}={}) {
     this.invalidate(id);
+    Promise.resolve(this.#adapters.get(id)?.logout?.()).catch(()=>{});
     if(clear)this.state.accounts=this.state.accounts.filter(a=>a.platformId!==id||a.workspaceId!==this.workspaceId());
     else for(const a of this.state.accounts)if(a.platformId===id&&a.workspaceId===this.workspaceId())a.status='disabled';
     this.persist();return this.status(id);
@@ -83,5 +84,5 @@ export class AccountManager {
     if(!adapter.revokeAccount)return {remote:'unsupported',...this.status(id)};
     await adapter.revokeAccount(c.credentials,{});return {remote:'revoked',...this.status(id)};
   }
-  dispose(){this.#secrets.clear();this.#pending.clear();for(const id of this.#adapters.keys())this.#epochs.set(id,this.epoch(id)+1);}
+  dispose(){for(const adapter of this.#adapters.values())Promise.resolve(adapter.dispose?.()).catch(()=>{});this.#secrets.clear();this.#pending.clear();for(const id of this.#adapters.keys())this.#epochs.set(id,this.epoch(id)+1);}
 }

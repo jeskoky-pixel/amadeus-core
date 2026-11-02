@@ -11,6 +11,8 @@ import { CoreStore, MODULES, atomicJson } from './store.js';
 import { acquireLease, legacyConflicts, installLegacyGuard } from './ownership.js';
 import { host, member, assertIdle } from './host.js';
 import { AccountManager } from '../platforms/accounts.js';
+import {makeXhsBrowserAdapter} from '../platforms/xhs-browser.js';
+import {socialPolicy} from '../platforms/social-journal.js';
 import {makeBilibiliAdapter} from '../platforms/bilibili.js';
 import {makeXiaohongshuAdapter} from '../platforms/xiaohongshu.js';
 import {createPlatformTransport} from '../platforms/transport.js';
@@ -46,8 +48,8 @@ export class CoreRuntime {
     this.activeConfigs={};
     this.runningRevision = null; this.tail = Promise.resolve();
     this.accounts=new AccountManager({file:path.join(root,'platform-accounts.json'),workspaceId:()=>this.store.state.workspaceId});
-    const real=[makeBilibiliAdapter(),makeXiaohongshuAdapter({transport:createPlatformTransport({allowedOrigins:['https://openaccount.xiaohongshu.com']})})];
-    this.platforms=new PlatformRegistry({budgetFile:path.join(root,'platform-budget.json'),trustedRealAdapters:real,accounts:this.accounts,authorizeIdentity:identity=>member(this.ctx,this.store.state.workspaceId===identity?.workspaceId?identity.workspaceId:null,identity?.sessionId)});
+    const real=[makeXhsBrowserAdapter(),makeBilibiliAdapter(),makeXiaohongshuAdapter({transport:createPlatformTransport({allowedOrigins:['https://openaccount.xiaohongshu.com']})})];
+    this.platforms=new PlatformRegistry({budgetFile:path.join(root,'platform-budget.json'),journalFile:path.join(root,'platform-actions.json'),trustedRealAdapters:real,accounts:this.accounts,authorizeIdentity:identity=>member(this.ctx,this.store.state.workspaceId===identity?.workspaceId?identity.workspaceId:null,identity?.sessionId)});
     for(const adapter of real){this.accounts.register(adapter);this.platforms.register(adapter);}
     this.platforms.register(makeBilibiliMock());this.platforms.register(makeXiaohongshuMock());
     this.experiences=new Experiences(this);this.activity=new CoreActivity(this);
@@ -125,7 +127,8 @@ export class CoreRuntime {
     const wasApplied=this.runningRevision===this.store.state.revision;
     const entry=this.platforms.entries.get(input.id),c=input.config;
     if(!entry||!c||(c.autonomous!==undefined&&typeof c.autonomous!=='boolean')||(c.minIntervalMs!==undefined&&(!Number.isSafeInteger(c.minIntervalMs)||c.minIntervalMs<0||c.minIntervalMs>3600000))||typeof c.enabled!=='boolean'||!Array.isArray(c.permissions)||c.permissions.some(p=>!entry.adapter.capabilities.includes(p))||!Number.isSafeInteger(c.maxRequests)||c.maxRequests<1||c.maxRequests>1000)throw Error('CORE_PLATFORM_CONFIG');
-    this.store.update(input.revision,s=>{s.platforms[input.id]={enabled:c.enabled,permissions:[...new Set(c.permissions)],maxRequests:c.maxRequests,autonomous:c.autonomous??entry.adapter.simulated===true,minIntervalMs:c.minIntervalMs??0};});
+    const social=socialPolicy(c.social);
+    this.store.update(input.revision,s=>{s.platforms[input.id]={enabled:c.enabled,permissions:[...new Set(c.permissions)],maxRequests:c.maxRequests,autonomous:c.autonomous??entry.adapter.simulated===true,minIntervalMs:c.minIntervalMs??0,social};});
     this.platforms.configure(input.id,this.store.state.platforms[input.id]);if(wasApplied)this.runningRevision=this.store.state.revision;return this.overview();
   });}
   dryRunPlatform(input){return this.serial(async()=>{
@@ -139,9 +142,14 @@ export class CoreRuntime {
     if(!['read','browse','search','comments','related','subtitles','images'].includes(input.operation))throw Error('CORE_PLATFORM_DENIED');
     return this.activity.explore(({step})=>step===0?{platform:input.id,operation:input.operation,input:input.input}:null,{maxSteps:1});
   });}
+  platformAction(input){return this.serial(async()=>{
+    if(this.status!=='ready')throw Error('CORE_NOT_READY');
+    if(input.id!=='xiaohongshu-browser'||!['like','comment','reply'].includes(input.operation))throw Error('CORE_PLATFORM_DENIED');
+    return this.activity.explore(({step})=>step===0?{platform:input.id,operation:input.operation,input:input.input}:null,{maxSteps:1,maxDurationMs:30000});
+  });}
   async accountAction(input){
     if(!['logout','revoke','clear'].includes(input.action)&&this.status!=='ready')throw Error('CORE_NOT_READY');
-    const id=input.id;if(!['bilibili','xiaohongshu'].includes(id))throw Error('CORE_PLATFORM_INPUT');
+    const id=input.id;if(!['bilibili','xiaohongshu','xiaohongshu-browser'].includes(id))throw Error('CORE_PLATFORM_INPUT');
     // Do not queue revocation behind an active network call. Epoch checks discard in-flight results.
     if(['begin','logout','revoke','clear'].includes(input.action)){
       const wasApplied=this.runningRevision===this.store.state.revision;

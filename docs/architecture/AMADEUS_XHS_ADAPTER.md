@@ -1,4 +1,6 @@
-# Xiaohongshu adapter
+# Xiaohongshu adapters
+
+2026-11-03: the separate dedicated-browser adapter is documented in [XHS_BROWSER_ACCEPTANCE.md](XHS_BROWSER_ACCEPTANCE.md). The following describes only the official device authorization adapter.
 Sources checked 2026-11-02: [API reference](https://openaccount.xiaohongshu.com/docs/api-reference), [OAuth flow](https://openaccount.xiaohongshu.com/docs/oauth2-flow), [scopes](https://openaccount.xiaohongshu.com/docs/scope), [error codes](https://openaccount.xiaohongshu.com/docs/error-code).
 
 Official Web integration uses device/code and device/token with an approved app_id/app_secret. Current scope is basic_info only. read_notes/write_notes and richer profile permissions are planned, not implicitly granted. No redirect_uri is required for this device flow.

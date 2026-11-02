@@ -1,3 +1,5 @@
+> 2026-11-03 addendum: [dedicated XHS browser candidate, safety contract and current evidence](XHS_BROWSER_ACCEPTANCE.md). Statements below that all social writes are unsupported describe the prior device-auth/read-only baseline. Bilibili and official XHS OAuth remain read-only/identity-only.
+
 # Account authorization and credentials
 Account identity is Workspace + platformId + accountId, never display name. Only Owner-authorized same-origin marked POST can start, poll, verify, refresh, disconnect, revoke or clear accounts. Login challenges are one-time, time-limited, rate-limited and bound to the Workspace and a random login ID. No ordinary callback can supply an identity or register an adapter.
 

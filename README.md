@@ -28,3 +28,7 @@ Bilibili 已实现网页端扫码客户端和元数据/热门/搜索/评论/相�
 
 原模块的版权与许可证见 [NOTICE.md](NOTICE.md) 和各模块保留的 LICENSE。整合不取消原始署名。
 
+
+
+### XHS dedicated browser candidate / 小红书独立浏览器候选
+Separate ephemeral Edge login, note/comment reading and scoped like/comment/reply execution are available for review. All grants default off. Owner must authorize note IDs and the Activity Session; unknown results never auto-replay. Official XHS device OAuth remains basic_info only. **Real XHS account acceptance is pending**; browser fixture results are not live-site evidence. See [setup](docs/architecture/AMADEUS_PLATFORM_LOGIN_GUIDE.md) and [verification](docs/architecture/XHS_BROWSER_ACCEPTANCE.md). No production installation or release is implied.

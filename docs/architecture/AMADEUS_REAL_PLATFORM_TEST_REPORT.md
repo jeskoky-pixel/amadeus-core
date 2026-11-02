@@ -1,3 +1,5 @@
+> 2026-11-03 addendum: [dedicated XHS browser candidate, safety contract and current evidence](XHS_BROWSER_ACCEPTANCE.md). Statements below that all social writes are unsupported describe the prior device-auth/read-only baseline. Bilibili and official XHS OAuth remain read-only/identity-only.
+
 # Amadeus Core Alpha 0.2 — verification report
 
 Development candidate `@fg-lab/amadeus-core@0.2.0-alpha.1`, based on main f99dcb0e95ecd3fbc1ff7ddf34e08696d80d860c. No release, market submission, production install, user Session deletion, or main merge authorized/performed.

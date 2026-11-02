@@ -41,11 +41,11 @@ export class Experiences {
     }
     // Evidence comes from the registry's private receipt ledger, never model fields.
     const event={...entry,evidenceLevel,visibility:'session',facts:observation,
-      interpretation:null,actionReceipt:{kind:evidenceLevel,externalAction:false}};
+      interpretation:null,actionReceipt:{kind:evidenceLevel,externalAction:trusted?.externalAction===true}};
     const saved=await memory.unifiedRuntime.authorize.run(session,()=>memory.service.saveWithDedupe({
       id:eventId,type:'history',title:`${evidenceLevel}: ${platform} ${operation}`,
       content:JSON.stringify(event),importance:3,tags:['amadeus-experience',evidenceLevel],
-      evidence:[{kind:evidenceLevel==='simulation'?'simulated-platform':'platform-read',ref:eventId}]
+      evidence:[{kind:evidenceLevel==='simulation'?'simulated-platform':evidenceLevel==='live-action'?'platform-action':'platform-read',ref:eventId}]
     }));
     if(!saved?.memory?.id) throw Error('CORE_EXPERIENCE_MEMORY_REJECTED');
     member(r.ctx,workspaceId,sessionId);

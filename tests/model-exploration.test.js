@@ -104,3 +104,14 @@ test('unconfirmed Life completion is not reported as successful',async t=>{
   await assert.rejects(finish(runtime,'activity'),/FINISH_UNCONFIRMED/);
   assert.notEqual(runtime.activity.saved.phase,'Idle');
 });
+
+test('social model tool shares Life activity and refuses read-tool write escalation',async t=>{
+ const {runtime,counts}=fixture(t),id='a'.repeat(24);const adapter={id:'xiaohongshu-browser',contractVersion:2,mode:'real',requiresAccount:true,socialWrites:true,capabilities:['comment'],execute:async(op,arg,ctx)=>{ctx.assertAuthorized();return {status:'confirmed',operation:op,contentId:arg.id};}};
+ runtime.platforms=new PlatformRegistry({journalFile:path.join(runtime.root,'actions.json'),trustedRealAdapters:[adapter],accounts:{status:()=>null,context:()=>({accountId:'u',credentials:{}}),epoch:()=>0}});runtime.platforms.register(adapter);
+ runtime.platforms.configure(adapter.id,{enabled:true,autonomous:true,permissions:['comment'],social:{noteIds:[id],sessionIds:['activity']}});
+ const args={goal:'Synthetic interaction',platform:adapter.id,operation:'comment',id,text:'synthetic'};
+ await assert.rejects(observe(runtime,'activity',args),/INPUT/);
+ await assert.rejects(observe(runtime,'other',args,{social:true}),/SESSION_REQUIRED/);
+ const result=await observe(runtime,'activity',args,{social:true});assert.equal(result.observation.evidenceLevel,'live-action');assert.deepEqual(counts(),{starts:1,records:1});
+ await assert.rejects(observe(runtime,'activity',args,{social:true}),/ALREADY_RECORDED/);assert.deepEqual(counts(),{starts:1,records:1});
+});
