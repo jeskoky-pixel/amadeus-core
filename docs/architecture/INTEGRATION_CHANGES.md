@@ -25,3 +25,6 @@ Only Core orchestration/platform/UI files changed; retained module algorithms/sc
 
 
 2026-11-03 XHS dedicated-browser candidate: original Node/Playwright implementation. Researched xpzouying/xiaohongshu-mcp (Apache-2.0), observed revision d6352e5435b45ebb48fe240dc03a2bec0476bd56, for browser interaction concepts and selector/data shapes; no source files or Go dependencies imported. Unlike reference behavior, credentials are not exported to JSON, uncertain sends do not retry, and reply confirmation requires the exact parent, actor, newly acknowledged comment ID and server response. No stealth, CAPTCHA bypass or signature generation. Core owns authorization/journal; Life remains the sole wake scheduler; QQ and retained module code are unchanged. Playwright-core 1.58.2 is Apache-2.0 and launches installed Edge without install-time browser download.
+
+## Core alpha.2 presentation adapters
+Core-only build replaces State standalone subtitle with Core state module wording. Scoped Life/State CSS and same-origin Persona embed CSS unify presentation and secondary navigation; original module sources, storage and behavior are retained. Memory appearance is exempt from the redesign.
