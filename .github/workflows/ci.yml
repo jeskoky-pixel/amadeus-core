@@ -1,0 +1,35 @@
+name: Core candidate checks
+on:
+  push:
+permissions:
+  contents: read
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm run build
+      - run: npm test
+      - run: npm run test:modules
+      - run: npm run pack:check
+      - name: Build candidate archive
+        run: npm pack --ignore-scripts
+      - name: Archive SHA-256
+        shell: bash
+        run: sha256sum *.tgz > SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: core-alpha-${{ matrix.os }}
+          path: |
+            *.tgz
+            SHA256SUMS
+

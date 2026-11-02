@@ -1,0 +1,6 @@
+src/modules/*/test/
+src/modules/*/tests/
+src/modules/*/scripts/
+src/modules/*/.test-tmp/
+**/*.log
+**/*.private.*

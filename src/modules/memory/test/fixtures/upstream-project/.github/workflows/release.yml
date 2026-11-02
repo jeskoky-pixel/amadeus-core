@@ -1,0 +1,226 @@
+name: Release
+
+# 优化版（对比原 publish.yml）：原流程只做「同步 root 版本 → npm publish」，测试要靠
+# test.yml 恰好绿着。本流程把一次 v* tag 推送变成完整发布流水线：
+#
+#   verify（版本号管理）→ test（双平台全量测试，矩阵同 CI）→ publish（npm）→ release（GitHub Release）→ notify（结果摘要）
+#
+# 沿用 publish.yml 的血泪教训并固化成步骤：
+#   1. 发布根是 dsh-mneme/ 子目录（真实版本在 dsh-mneme/package.json，prepack 自动
+#      npm run sync 同步 src→lib）——npm publish 在 dsh-mneme/ 下跑，包结构与
+#      v0.7.12/0.7.13 本机发布一致；root 的 package.json 只是仓库壳（private、
+#      0.0.0、不带 dsh 字段，为单仓多包的工具探测而存在），绝不发布、也不要把
+#      插件 link/junction 指到仓库根——那样加载到的会是壳而不是插件。
+#   2. 「skip if exists」幂等守卫：同一版本重复推 tag 不会重复发布。
+#
+# 新增的版本号管理规则：
+#   - tag 必须与 dsh-mneme/package.json version 完全一致（vX.Y.Z ↔ X.Y.Z），否则直接失败；
+#   - tag 对应版本必须在 dsh-mneme/CHANGELOG.md 里有小节（文档先行，发布时自动抽取作 Release 说明）。
+#
+# 手动触发（workflow_dispatch）支持 dry_run：只跑 verify + test，不发布不建 Release。
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: '只验证 + 测试，不发布（dry run）'
+        type: boolean
+        default: false
+
+# 权限按 job 发放，工作流级一律只读：
+#   publish → id-token: write（npm provenance 走 OIDC，不需要长期 token）
+#   release → contents: write（建/改 GitHub Release）
+# verify/test/notify 只读代码。工作流级给写权限等于把它们全变成可被依赖链
+# 利用的提权面（CWE-250）。
+permissions:
+  contents: read
+
+jobs:
+  # ── 1. 版本号管理：tag ↔ package.json ↔ CHANGELOG 三方一致 ──────────────
+  verify:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Resolve version (tag push or package.json)
+        id: ver
+        run: |
+          PKG_V="$(node -p "require('./dsh-mneme/package.json').version")"
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            TAG_V="${GITHUB_REF_NAME#v}"
+            echo "tag=v$TAG_V, package.json=$PKG_V"
+            if [ "$TAG_V" != "$PKG_V" ]; then
+              echo "::error::tag v$TAG_V 与 dsh-mneme/package.json 版本 $PKG_V 不一致"
+              exit 1
+            fi
+            echo "version=$PKG_V" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=$PKG_V" >> "$GITHUB_OUTPUT"
+          fi
+
+      # 文档更新守门：CHANGELOG 缺该版本小节 → 说明发布说明没写，阻断并提示
+      - name: CHANGELOG has a section for this version
+        run: |
+          V="${{ steps.ver.outputs.version }}"
+          if ! grep -qE "^## \[${V}\]" dsh-mneme/CHANGELOG.md; then
+            echo "::error::dsh-mneme/CHANGELOG.md 缺少 ## [${V}] 小节——请先补发布说明"
+            exit 1
+          fi
+          echo "CHANGELOG section found for ${V}"
+
+  # ── 2. 双平台全量测试（Windows + Linux × Node 22/24，与 CI 同矩阵）────────
+  test:
+    needs: verify
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        node-version: [22, 24]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: dsh-mneme
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+          cache-dependency-path: dsh-mneme/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Sync check (src ↔ lib)
+        run: node scripts/check-sync.js
+
+      - name: Full test suite
+        run: npm test
+
+  # ── 3. 发布到 npm（沿用原 publish.yml 的同步与幂等守卫）──────────────────
+  publish:
+    needs: [verify, test]
+    if: github.event_name == 'push' || inputs.dry_run != true
+    runs-on: ubuntu-latest
+    # npm provenance 用 OIDC 而不是长期 token 签名：--provenance 需要 id-token。
+    # 挂在 job 上而不是 workflow 上，别的 job 拿不到这个能力。
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org/
+
+      - name: Registry current state (diagnostic)
+        run: |
+          npm view @modusensus/dsh-mneme versions --json || true
+          npm view @modusensus/dsh-mneme time --json || true
+
+      # 发布根 = dsh-mneme/（dsh-mneme/package.json 是真实版本 + prepack `npm run sync` 自动同步
+      # src→lib），与 v0.7.12/0.7.13 本机发布包结构一致；root 壳不参与发布，无需 root 版本同步
+      - name: Publish @modusensus/dsh-mneme (skip if exists)
+        working-directory: dsh-mneme
+        run: |
+          V="${{ needs.verify.outputs.version }}"
+          if npm view "@modusensus/dsh-mneme@${V}" version >/dev/null 2>&1; then
+            echo "v${V} already published on registry — skipping"
+          else
+            # --provenance：把 tarball 与这次 commit / workflow 绑成可验证的 attestation，
+            # 消费者能确认「这个版本确实从这条 commit 发出来」，而不是相信 registry 上的名字。
+            npm publish --access public --provenance
+          fi
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      # 真闸门：拿不到这个版本就非零退出，让 job 变红。
+      # 原先这里是 `echo "Published: $(npm view "@modusensus/dsh-mneme@${V}" version)"` —— 命令
+      # 替换里的失败**不会**让 `set -e` 退出：v0.8.16 那次日志白纸黑字写着
+      # `npm error code E404 / 404 No match found for version 0.8.16`，step 与 job 却都是绿的。
+      # 闸门必须能区分「发出去了」与「没发出去」，而两者当时是同一种颜色。
+      # 轮询而不是一次性查询：registry 有传播延迟（v0.8.16 实测 publish→可见约 4.5 分钟），
+      # 一次性查询只有假绿或假红两种结局；幂等跳过路径首次探测即通过，不付等待成本。
+      - name: Verify published version (blocking gate)
+        run: node dsh-mneme/scripts/publish-gate.mjs "${{ needs.verify.outputs.version }}"
+
+  # ── 4. GitHub Release（按 v0.7.9 / v0.7.10 的既定格式，说明自动取自 CHANGELOG）──
+  # needs 里必须带 publish：Release 是对外的「这个版本已发布」声明，registry 才是唯一事实。
+  # 只等 verify/test 时，publish 真失败（token 失效、registry 拒绝）Release 照样建出来 ——
+  # Release 页写着 v0.8.x、registry 上却没有，用户按 Release 装回的是上一个版本。这是与
+  # 「Verify published version」同源的一处豁口：那边是校验假绿，这边是声明抢跑。
+  # 带上 publish 后两条路径都收口：publish 失败 ⇒ 本 job 被跳过；dry_run 时 publish 被跳过，
+  # 而本 job 的 `if` 同为假 ⇒ 不会发出无从兑现的发布声明。
+  release:
+    needs: [verify, test, publish]
+    if: github.event_name == 'push' || inputs.dry_run != true
+    runs-on: ubuntu-latest
+    # 建/改 GitHub Release 要写权限，只有这个 job 需要。
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      # Release 正文的渲染搬进了 dsh-mneme/scripts/release-notes.mjs（原先这段是内联 node -e）。
+      # 搬出去的理由不是「代码要短」：Release 正文的排版会被反复调整，内联脚本改一次就要动工作流
+      # 本体、还没法写测试。现在渲染有单测（test/release-notes.test.js），本地也能先预览再发。
+      # 渲染是分层而不是截断：标题 + 一句导语默认可见，剩余正文折进 details —— CHANGELOG 本体
+      # 一个字不动（那是含决策理由的完整记录），压缩只发生在对外渲染这一步。
+      - name: Extract release notes from CHANGELOG
+        run: node dsh-mneme/scripts/release-notes.mjs "${{ needs.verify.outputs.version }}"
+
+      - name: Create / update GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.verify.outputs.version }}
+        run: |
+          # 标题统一纯版本号（v0.7.9 基准，9/8 决定）；Release 正文由上方抽取的 CHANGELOG 小节
+          # 渲染而来，分类小节名以 CHANGELOG 实际写法为准（现为 ## 📦 仓库结构 / 🔐 安全 / 🧰 发版与文档 这类）。
+          # 这里不再重复列出分类：写死的清单会随 CHANGELOG 演进而变成假话。
+          if gh release view "v${VERSION}" >/dev/null 2>&1; then
+            gh release edit "v${VERSION}" --title "v${VERSION}" --notes-file notes/body.md
+          else
+            gh release create "v${VERSION}" --title "v${VERSION}" --notes-file notes/body.md
+          fi
+
+  # ── 5. 通知与运行摘要（接入外部通知时往这里加一步 webhook 即可）────────────
+  #    徽章对齐不在流水线里做：main 受保护（4 个必过检查 + strict + 线性历史），
+  #    github-actions[bot] 的 GITHUB_TOKEN 绕过不了 required status checks，
+  #    push 必被 GH006 拒（v0.8.3 实测），改由发版前本地跑 npm run badge:sync，
+  #    与人工发布同一次提交带上。
+  notify:
+    needs: [verify, test, publish, release]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Job summary
+        run: |
+          {
+            echo "## Release pipeline — ${{ needs.verify.outputs.version }}"
+            echo ""
+            echo "| job | result |"
+            echo "|-----|--------|"
+            echo "| verify | ${{ needs.verify.result }} |"
+            echo "| test (win/linux × node 22/24) | ${{ needs.test.result }} |"
+            echo "| publish (npm) | ${{ needs.publish.result }} |"
+            echo "| release (GitHub) | ${{ needs.release.result }} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+      # 可选：企业微信/Telegram/邮件 webhook。配置 secret（如 NOTIFY_WEBHOOK）后取消注释：
+      # - name: Notify webhook
+      #   if: needs.publish.result == 'success'
+      #   run: |
+      #     curl -sf -X POST "${{ secrets.NOTIFY_WEBHOOK }}" \
+      #       -H 'Content-Type: application/json' \
+      #       -d '{"msgtype":"text","text":{"content":"dsh-mneme ${{ needs.verify.outputs.version }} 已发布"}}'

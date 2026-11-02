@@ -1,0 +1,1 @@
+Core retains MIT source from Amadeus Memory/Life/State/Persona. Memory includes Mneme by modusensus: see src/modules/memory/LICENSE and UPSTREAM.md. No Bilibili/Xiaohongshu reference source imported. SOURCE_MANIFEST records unmodified import hashes; integration modifications must be listed separately.

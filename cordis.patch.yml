@@ -1,0 +1,3 @@
+- insert:
+    - id: amadeus-core
+      name: '@fg-lab/amadeus-core'
