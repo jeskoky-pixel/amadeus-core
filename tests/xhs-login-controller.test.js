@@ -1,3 +1,4 @@
+import {XhsLocalClient} from '../src/platforms/xhs-local-client.js';
 import test from 'node:test';import assert from 'node:assert/strict';import {XhsLoginController} from '../src/platforms/xhs-login-controller.js';
 function fixture(){let now=1000,valid=false,identity={accountId:'actor'},qrCalls=0;const c=new XhsLoginController({workspaceId:'w',now:()=>now,client:{beginLogin:async()=>{qrCalls++;return {qrDataUrl:'data:image/png;base64,YQ==',expiresInMs:240000};},account:async()=>identity},storage:{inspect:async()=>({valid,accountId:'actor'}),bind:async()=>{}}});return {c,setValid:v=>valid=v,setIdentity:v=>identity=v,tick:()=>now+=16000,get qrCalls(){return qrCalls;}};}
 test('QR generated once; persisted identity is not reported as read-ready',async()=>{const f=fixture();await f.c.begin();await f.c.begin();assert.equal(f.qrCalls,1);await f.c.check();assert.equal(f.c.state,'waiting_scan');f.setValid(true);f.tick();await f.c.check();assert.equal(f.c.state,'identity_verified');assert.throws(()=>f.c.recordRead({accountId:'other',workspaceId:'w',contentId:'note',sourceUrl:'https://www.xiaohongshu.com/explore/note'}));f.c.recordRead({accountId:'actor',workspaceId:'w',contentId:'note',sourceUrl:'https://www.xiaohongshu.com/explore/note'});assert.equal(f.c.state,'ready_for_read');});
@@ -17,4 +18,18 @@ test('temporary service failure preserves prior identity and does not revoke per
  const f=fixture();f.setValid(true);await f.c.check();
  f.c.client.account=async()=>{throw Error('CORE_PLATFORM_LOCAL_SERVICE_UNAVAILABLE');};
  f.tick();await f.c.check();assert.equal(f.c.state,'service_unavailable');assert.equal(f.c.status().accountId,'actor');
+});
+
+test('logged-in without user ID stays identity-pending and never asks for another QR',async()=>{
+ const f=fixture();f.setValid(true);
+ const httpClient=new XhsLocalClient({token:()=> 'synthetic',fetchImpl:async()=>new Response(JSON.stringify({success:true,data:{is_logged_in:true}}))});
+ f.c.client.account=()=>httpClient.account();
+ await f.c.check({restore:true});
+ assert.equal(f.c.state,'website_authenticated');assert.equal(f.c.status().needsRescan,false);
+ assert.equal(f.c.status().readiness.identity,'pending');assert.equal(f.c.status().readiness.read,'not_verified');
+ f.c.cancel();assert.equal(f.c.state,'website_authenticated');
+ await f.c.begin();assert.equal(f.qrCalls,0);
+ assert.throws(()=>f.c.recordRead({accountId:'actor',workspaceId:'w',contentId:'note',sourceUrl:'https://www.xiaohongshu.com/explore/note'}));
+ f.c.client.account=async()=>({accountId:'actor'});f.tick();await f.c.check({restore:true});
+ assert.equal(f.c.status().readiness.identity,'passed');assert.equal(f.c.status().readiness.read,'not_verified');
 });

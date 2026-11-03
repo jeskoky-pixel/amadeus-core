@@ -12,6 +12,8 @@ export const XHS_SERVICE_HOST = '127.0.0.1';
 const TOKEN_BYTES = 32;
 const MAX_RESTART_RETRIES = 2;
 const SHA256_HEX = /^[a-f0-9]{64}$/i;
+const PROBE_STAGES = ['authentication', 'storage', 'browser', 'qr'];
+const newReadiness = () => Object.fromEntries(['http', ...PROBE_STAGES].map(key => [key, {status:'not_checked', checkedAt:null, code:null}]));
 const SAFE_CODE = /^CORE_PLATFORM_[A-Z0-9_]+$/;
 
 function fail(code) {
@@ -58,6 +60,10 @@ function validAbsolutePath(value) {
 }
 
 export class XhsServiceSupervisor {
+  #readiness = newReadiness();
+  #probes;
+  #diagnosing = null;
+  #diagnosticAbort = null;
   #workspaceId;
   #root;
   #executable;
@@ -89,6 +95,7 @@ export class XhsServiceSupervisor {
     if (!isRecord(options)) fail('XHS_SERVICE_CONFIG');
     const {
       workspaceId,
+      probes = {},
       root,
       executable,
       expectedSha256,
@@ -107,6 +114,8 @@ export class XhsServiceSupervisor {
     if (!validAbsolutePath(executable)) fail('XHS_SERVICE_CONFIG');
     if (typeof expectedSha256 !== 'string' || !SHA256_HEX.test(expectedSha256)) fail('XHS_SERVICE_CONFIG');
 
+    if (!isRecord(probes) || Object.keys(probes).some(key => !PROBE_STAGES.includes(key) || typeof probes[key] !== 'function')) fail('XHS_SERVICE_CONFIG');
+    this.#probes = Object.freeze({...probes});
     this.#workspaceId = workspaceId;
     this.#root = path.resolve(root);
     this.#executable = path.resolve(executable);
@@ -136,10 +145,10 @@ export class XhsServiceSupervisor {
   }
 
   start() {
-    if (this.#state === 'ready') return Promise.resolve(this.#snapshot());
+    if (this.#state === 'http_ready') return Promise.resolve(this.#snapshot());
     if (this.#state === 'starting' && this.#startPromise) return this.#startPromise;
     if (this.#stopPromise) return Promise.reject(safeError('XHS_SERVICE_STOPPING'));
-    if (this.#managed && this.#state !== 'ready') return Promise.reject(safeError('XHS_SERVICE_STOP'));
+    if (this.#managed && this.#state !== 'http_ready') return Promise.reject(safeError('XHS_SERVICE_STOP'));
     if (this.#state === 'unavailable') return Promise.reject(safeError('XHS_SERVICE_UNAVAILABLE'));
     if (this.#state !== 'stopped') return Promise.reject(safeError('XHS_SERVICE_UNAVAILABLE'));
     return this.#beginStart();
@@ -149,6 +158,8 @@ export class XhsServiceSupervisor {
     if (this.#stopPromise) return this.#stopPromise;
     const active = this.#startPromise;
     this.#epoch += 1;
+    this.#diagnosticAbort?.abort();
+    this.#readiness = newReadiness();
     this.#state = 'stopped';
     this.#lastFailure = null;
     this.#startAbort?.abort();
@@ -183,9 +194,68 @@ export class XhsServiceSupervisor {
     return tracked;
   }
 
+  // Host-only diagnostic adapters, never populated from UI/model input. A health
+  // response establishes HTTP availability only. Missing probes stay unknown.
+  diagnose() {
+    if (this.#diagnosing) return this.#diagnosing;
+    if (this.#state !== 'http_ready') return Promise.reject(safeError('XHS_SERVICE_UNAVAILABLE'));
+    const epoch = this.#epoch;
+    const controller = new AbortController();
+    this.#diagnosticAbort = controller;
+    const task = this.#runDiagnostics(epoch, controller);
+    this.#diagnosing = task;
+    task.then(() => clear(), () => clear());
+    const clear = () => {
+      if (this.#diagnosing === task) this.#diagnosing = null;
+      if (this.#diagnosticAbort === controller) this.#diagnosticAbort = null;
+    };
+    return task;
+  }
+
+  async #runDiagnostics(epoch, controller) {
+    for (const key of PROBE_STAGES) {
+      this.#assertEpoch(epoch);
+      this.#readiness[key] = {status:'not_checked', checkedAt:null, code:null};
+    }
+    for (const key of PROBE_STAGES) {
+      this.#assertEpoch(epoch);
+      if (key === 'qr' && !['http','authentication','storage','browser'].every(stage => this.#readiness[stage].status === 'passed')) {
+        this.#readiness.qr = {status:'blocked', checkedAt:null, code:'PREREQUISITE_NOT_PASSED'};
+        continue;
+      }
+      if (!this.#probes[key]) continue;
+      const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(this.#healthTimeoutMs)]);
+      let abort;
+      const cancelled = new Promise((_, reject) => {
+        abort = () => reject(safeError('XHS_DIAGNOSTIC_TIMEOUT'));
+        signal.addEventListener('abort', abort, {once:true});
+        if (signal.aborted) abort();
+      });
+      // A referenced timer also keeps synthetic/no-I/O adapters alive until bounded completion.
+      const keepAlive = setTimeout(() => {}, this.#healthTimeoutMs + 1);
+      try {
+        const result = await Promise.race([cancelled, Promise.resolve().then(() => this.#probes[key]({
+          origin:`http://${XHS_SERVICE_HOST}:${this.#port}`, token:this.#token,
+          cookiesPath:this.#cookiesPath, signal,
+        }))]);
+        this.#assertEpoch(epoch);
+        this.#readiness[key] = {status:result?.passed === true ? 'passed':'failed', checkedAt:Date.now(),
+          code:result?.passed === true ? null:'PROBE_FAILED'};
+      } catch (error) {
+        this.#assertEpoch(epoch);
+        this.#readiness[key] = {status:'failed', checkedAt:Date.now(), code:signal.aborted ? 'PROBE_TIMEOUT':'PROBE_FAILED'};
+      } finally {
+        clearTimeout(keepAlive);
+        signal.removeEventListener('abort', abort);
+      }
+    }
+    return this.#snapshot();
+  }
+
   #beginStart() {
     const epoch = this.#epoch;
     this.#state = 'starting';
+    this.#readiness = newReadiness();
     this.#lastFailure = null;
     const task = this.#doStart(epoch);
     this.#startPromise = task;
@@ -268,7 +338,8 @@ export class XhsServiceSupervisor {
       this.#verifyHealth(healthResult);
       this.#assertEpoch(epoch);
 
-      this.#state = 'ready';
+      this.#readiness.http = {status:'passed', checkedAt:Date.now(), code:null};
+      this.#state = 'http_ready';
       this.#lastFailure = null;
       return this.#snapshot();
     } catch (error) {
@@ -409,9 +480,11 @@ export class XhsServiceSupervisor {
   #snapshot() {
     return Object.freeze({
       state: this.#state,
+      loginPrerequisitesReady: this.#state === 'http_ready' && Object.values(this.#readiness).every(item => item.status === 'passed'),
+      readiness: Object.freeze(Object.fromEntries(Object.entries(this.#readiness).map(([key,value]) => [key,Object.freeze({...value})]))),
       version: XHS_SERVICE_VERSION,
-      port: this.#state === 'ready' ? this.#port : null,
-      pid: this.#state === 'ready' ? this.#pid : null,
+      port: this.#state === 'http_ready' ? this.#port : null,
+      pid: this.#state === 'http_ready' ? this.#pid : null,
       lastFailure: this.#lastFailure,
     });
   }

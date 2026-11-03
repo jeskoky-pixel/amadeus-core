@@ -12,3 +12,5 @@
 No real social writes, likes, comments or messages were attempted. Mock tests are not evidence for any row. Main DSH/QQ/NapCat and user data remain untouched. Release status remains Alpha; replacement prohibited.
 
 Next real test must use one login and the same stable identity across all checks. Record sanitized timestamp, service/core version, Workspace digest, account digest, note ID/URL and outcome, never cookies or Bearer tokens. Stop at first failed gate.
+
+> Follow-up 2026-11-03: [Windows blocker diagnosis](XHS_WINDOWS_BLOCKER_DIAGNOSIS.md) supersedes earlier unresolved-cause statements. Low-integrity executable/Medium-directory mismatch explains seed creation denial; historical Defender quarantine is confirmed; original Chromium fails SideBySide despite complete matching archive. Gate A remains FAILED. New HTTP/probe and identity/read states do not imply live acceptance.

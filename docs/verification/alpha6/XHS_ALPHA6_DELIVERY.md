@@ -20,3 +20,5 @@ Next sequence: resolve isolated executable storage/browser startup without weake
 No main DSH installation or data modifications were performed. The service test was stopped after evidence collection.
 
 Targeted follow-up: the same Memory `strictPort: busy port` test passed 1/1 in isolation without code changes. This supports a transient/concurrent environment failure but does not establish its cause or erase the failed full-suite result. The skip is the existing Windows symlink creation test. No repeated full-suite run was used to mask either result.
+
+> Follow-up 2026-11-03: [Windows blocker diagnosis](XHS_WINDOWS_BLOCKER_DIAGNOSIS.md) supersedes earlier unresolved-cause statements. Low-integrity executable/Medium-directory mismatch explains seed creation denial; historical Defender quarantine is confirmed; original Chromium fails SideBySide despite complete matching archive. Gate A remains FAILED. New HTTP/probe and identity/read states do not imply live acceptance.

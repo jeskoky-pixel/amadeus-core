@@ -7,3 +7,5 @@ Pinned source: `d6352e5435b45ebb48fe240dc03a2bec0476bd56`; Apache-2.0. Selected 
 Upstream browser source is `https://cdn.one-world.ai/browsers/148.0.7778.215/windows-x64.zip`. Source downloads SHA256SUMS and verifies fresh archives, but accepts an existing cached browser without re-verification. Observed cached chrome.exe SHA-256: `1867319e56bcabbc4681d8575c002106ce7b61b5290dc5eb34a37676805f6915`. This local hash is inventory, NOT publisher authenticity verification. Reproducible archive-to-cache integrity verification remains pending.
 
 ShunL12324/xhs-mcp (`cb963621390dfa22d19103ed88ab55a3d57a74ba`, MIT) is reference only; not a dependency or second executor.
+
+> Follow-up 2026-11-03: [Windows blocker diagnosis](XHS_WINDOWS_BLOCKER_DIAGNOSIS.md) supersedes earlier unresolved-cause statements. Low-integrity executable/Medium-directory mismatch explains seed creation denial; historical Defender quarantine is confirmed; original Chromium fails SideBySide despite complete matching archive. Gate A remains FAILED. New HTTP/probe and identity/read states do not imply live acceptance.

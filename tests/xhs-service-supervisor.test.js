@@ -18,6 +18,7 @@ function workspaceCookiesPath(workspaceId, root = ROOT) {
 }
 
 function fixture({
+  probes,
   workspaceId = WORKSPACE,
   root = ROOT,
   hashFile,
@@ -42,6 +43,7 @@ function fixture({
 
   const supervisor = new XhsServiceSupervisor({
     workspaceId,
+    probes,
     root,
     executable: EXECUTABLE,
     expectedSha256: CHECKSUM,
@@ -98,7 +100,7 @@ test('synthetic lifecycle validates checksum, binds loopback and uses explicit c
   assert.equal(supervisor.status().port, null);
 
   const ready = await starting;
-  assert.equal(ready.state, 'ready');
+  assert.equal(ready.state, 'http_ready');
   assert.equal(ready.version, XHS_SERVICE_VERSION);
   assert.equal(ready.port, 18060);
   assert.equal(ready.pid, 4001);
@@ -147,7 +149,7 @@ test('concurrent start on one instance shares one spawn and one health check', a
   releaseHash();
   const [a, b] = await Promise.all([first, second]);
   assert.deepEqual(a, b);
-  assert.equal(a.state, 'ready');
+  assert.equal(a.state, 'http_ready');
   assert.equal(calls.spawns.length, 1);
   assert.equal(calls.health, 1);
 
@@ -213,7 +215,7 @@ test('stop rejects new lifecycle calls while cleaning up and can start again aft
   assert.deepEqual(calls.stops, [handles[0]]);
 
   const ready = await supervisor.start();
-  assert.equal(ready.state, 'ready');
+  assert.equal(ready.state, 'http_ready');
   assert.equal(calls.spawns.length, 2);
   await supervisor.stop();
 });
@@ -224,7 +226,7 @@ test('explicit restart after stop performs one new lifecycle without replay', as
   await supervisor.start();
   await supervisor.stop();
   const ready = await supervisor.restart();
-  assert.equal(ready.state, 'ready');
+  assert.equal(ready.state, 'http_ready');
   assert.equal(calls.spawns.length, 2);
   assert.equal(calls.health, 2);
   assert.equal(calls.stops.length, 1);
@@ -245,7 +247,7 @@ test('restart retries at most twice with exponential backoff and no hidden retri
   });
 
   const ready = await supervisor.restart();
-  assert.equal(ready.state, 'ready');
+  assert.equal(ready.state, 'http_ready');
   assert.equal(calls.spawns.length, 3);
   assert.equal(calls.stops.length, 2);
   assert.deepEqual(calls.sleeps, [10, 20]);
@@ -378,4 +380,39 @@ test('failed health cleanup prevents duplicate process on bounded restart', asyn
   assert.equal(calls.spawns.length,1);
   rejectStop=false;
   await supervisor.stop();
+});
+
+test('HTTP health alone never marks Gate A or login ready',async()=>{
+ const {supervisor}=fixture();const state=await supervisor.start();
+ assert.equal(state.state,'http_ready');assert.equal(state.loginPrerequisitesReady,false);
+ assert.equal(state.readiness.http.status,'passed');
+ assert.equal(state.readiness.browser.status,'not_checked');
+ assert.equal((await supervisor.diagnose()).readiness.qr.status,'blocked');
+ await supervisor.stop();assert.equal(supervisor.status().readiness.http.status,'not_checked');
+});
+
+test('independent probes report failures without exposing errors or generating QR',async()=>{
+ let qr=0;
+ const {supervisor}=fixture({probes:{authentication:async()=>({passed:true}),storage:async()=>({passed:false}),browser:async()=>{throw Error('private-token');},qr:async()=>{qr++;return {passed:true};}}});
+ await supervisor.start();const result=await supervisor.diagnose();
+ assert.equal(result.readiness.authentication.status,'passed');
+ assert.equal(result.readiness.storage.status,'failed');assert.equal(result.readiness.browser.status,'failed');
+ assert.equal(result.loginPrerequisitesReady,false);assert.equal(qr,0);assert.ok(!JSON.stringify(result).includes('private-token'));
+ await supervisor.stop();
+});
+
+test('all five prelogin checks are required; stop clears their evidence',async()=>{
+ const probes=Object.fromEntries(['authentication','storage','browser','qr'].map(key=>[key,async()=>({passed:true})]));
+ const {supervisor}=fixture({probes});await supervisor.start();
+ assert.equal((await supervisor.diagnose()).loginPrerequisitesReady,true);
+ await supervisor.stop();assert.equal(supervisor.status().loginPrerequisitesReady,false);
+});
+
+test('hanging and late diagnostic results cannot establish readiness',async()=>{
+ const {supervisor}=fixture({healthTimeoutMs:20,probes:{browser:async()=>new Promise(()=>{})}});
+ await supervisor.start();assert.equal((await supervisor.diagnose()).readiness.browser.code,'PROBE_TIMEOUT');await supervisor.stop();
+ let done;const late=fixture({probes:{authentication:()=>new Promise(resolve=>done=resolve)}});
+ await late.supervisor.start();const diagnosing=late.supervisor.diagnose();await new Promise(resolve=>setImmediate(resolve));
+ await late.supervisor.stop();done({passed:true});await assert.rejects(diagnosing,/SERVICE_STOPPED/);
+ assert.equal(late.supervisor.status().readiness.authentication.status,'not_checked');
 });
