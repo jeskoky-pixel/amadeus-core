@@ -17,3 +17,9 @@ This supersedes the earlier desktop-automation blocker: the native helper still 
 Core: 195 passed after the lifecycle fix. Life: 213 passed. Unchanged module run: Memory 2714 passed / 1 Windows skip; State 143 passed; Persona 49 passed. Build/package checks passed. Real account data, module stores, credentials and original activity binding were preserved.
 
 No merge, release, npm publish or NapCat changes. Screenshots and full real-account evidence remain local; no credentials, public-comment text, account identifiers or browsing content are added to Git. Temporary local debugging is removed after testing. No claim is made for unsupported favorite/follow/message/publish capabilities.
+
+## Final restart and read-back
+
+After restarting the installed Desktop candidate, the authenticated Owner read returned `ok=true` without another scan. Core remained `ready`; Life retained the original Activity Session, named-selector configuration and external-message guidance selection. The like/comment/reply journal still contained exactly the three confirmed actions; restart did not resend them. The new browse experience was stored as `live-read`.
+
+Independent detail read-back confirmed `liked=true`. The returned comment page contained only the first ten entries and indicated more pages; the new comment and reply were not found in that page. Their upstream acknowledgments are verified, but independent public visibility remains unverified. No additional social writes were performed to compensate for this limitation. Scheduled autonomous outbound posting is also not claimed as verified: the observed idle model wake chose silence.
