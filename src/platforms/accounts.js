@@ -52,8 +52,16 @@ export class AccountManager {
     const p=this.#pending.get(id),epoch=this.epoch(id);
     if(!p||p.loginId!==loginId||p.workspaceId!==this.workspaceId())fail('LOGIN_MISSING');
     if(p.public.expiresAt<=this.now()){this.#pending.delete(id);fail('CREDENTIALS_EXPIRED');}
-    if(p.nextPoll>this.now())fail('RATE_LIMITED');p.nextPoll=this.now()+p.public.intervalMs;
-    const result=await this.#adapters.get(id).pollLogin(p.private,{});
+    // Multiple UI checks share the cached pending state; do not label local
+    // polling throttling as a remote platform failure or issue duplicate calls.
+    if(p.polling||p.nextPoll>this.now())return this.status(id);
+    p.nextPoll=this.now()+p.public.intervalMs;p.polling=true;
+    let result;
+    try{result=await this.#adapters.get(id).pollLogin(p.private,{});}
+    catch(error){
+      if(['CORE_PLATFORM_LOGIN_MISSING','CORE_PLATFORM_CREDENTIALS_EXPIRED','CORE_PLATFORM_IDENTITY_MISMATCH'].includes(error.message)&&this.#pending.get(id)===p)this.#pending.delete(id);
+      throw error;
+    }finally{p.polling=false;}
     if(epoch!==this.epoch(id)||p.workspaceId!==this.workspaceId())fail('REVOKED');
     if(result.slowDown){p.public.intervalMs+=5000;p.nextPoll=this.now()+p.public.intervalMs;}
     if(result.pending)return {...this.status(id),scanned:result.scanned===true};
