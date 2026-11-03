@@ -575,6 +575,7 @@ export function apply(ctx, config = {}) {
     core,
     v1: core.v1,
     getRegistry: () => workspaceRegistry,
+    getSessionTitle: id => suppliedConfig.__coreSessionTitle?.(id) ?? optionalService(ctx, 'sessions')?.get(id)?.header?.title ?? '',
     legacyAllowed: () => delivery.allowedSessionIds,
     budgetConfig: () => budgetConfig,
     logger: ctx.logger,

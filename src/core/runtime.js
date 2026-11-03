@@ -88,6 +88,7 @@ export class CoreRuntime {
       const module = definitions[n];
       const config = { ...this.effectiveConfig(n), __coreBridge: bridge => { this.bridges[n] = bridge; } };
       if (n === 'memory') Object.assign(config, { memoryDir, ...memoryPolicy });
+      if (n === 'life') config.__coreSessionTitle = id => id === this.store.state.activitySessionId ? 'Amadeus 自主活动' : host(this.ctx, 'sessions')?.get(id)?.header?.title ?? '';
       if (n === 'life' || n === 'state') config.databasePath = path.join(moduleRoot, n, `${n}.sqlite`);
       if (n === 'persona') config.dataDirectory = path.join(moduleRoot, 'persona');
       this.activeConfigs[n]=config;
