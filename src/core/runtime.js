@@ -13,6 +13,7 @@ import { host, member, assertIdle } from './host.js';
 import { AccountManager } from '../platforms/accounts.js';
 import {makeXhsNativeAdapter} from '../platforms/xhs-native-adapter.js';
 import {socialPolicy} from '../platforms/social-journal.js';
+import {BrowserVault} from '../platforms/browser-vault.js';
 import {makeBilibiliAdapter} from '../platforms/bilibili.js';
 import {makeXiaohongshuAdapter} from '../platforms/xiaohongshu.js';
 import {createPlatformTransport} from '../platforms/transport.js';
@@ -48,7 +49,7 @@ export class CoreRuntime {
     this.activeConfigs={};
     this.runningRevision = null; this.tail = Promise.resolve();
     this.accounts=new AccountManager({file:path.join(root,'platform-accounts.json'),workspaceId:()=>this.store.state.workspaceId});
-    const real=[makeXhsNativeAdapter({root:path.join(root,'xhs-executor'),workspaceId:()=>this.store.state.workspaceId}),makeBilibiliAdapter(),makeXiaohongshuAdapter({transport:createPlatformTransport({allowedOrigins:['https://openaccount.xiaohongshu.com']})})];
+    const real=[makeXhsNativeAdapter({root:path.join(root,'xhs-executor'),workspaceId:()=>this.store.state.workspaceId}),makeBilibiliAdapter({vault:process.platform==='win32'?new BrowserVault({root:path.join(root,'bilibili-vault'),workspaceId:()=>this.store.state.workspaceId}):null}),makeXiaohongshuAdapter({transport:createPlatformTransport({allowedOrigins:['https://openaccount.xiaohongshu.com']})})];
     this.platforms=new PlatformRegistry({budgetFile:path.join(root,'platform-budget.json'),journalFile:path.join(root,'platform-actions.json'),trustedRealAdapters:real,accounts:this.accounts,authorizeIdentity:identity=>member(this.ctx,this.store.state.workspaceId===identity?.workspaceId?identity.workspaceId:null,identity?.sessionId)});
     for(const adapter of real){this.accounts.register(adapter);this.platforms.register(adapter);}
     this.platforms.register(makeBilibiliMock());this.platforms.register(makeXiaohongshuMock());
@@ -125,7 +126,7 @@ export class CoreRuntime {
     this.configureExplorationPlatforms();
   }
   configureExplorationPlatforms(){
-    for(const {id,simulated} of this.platforms.list()){const config=this.store.snapshot().platforms[id]??{enabled:simulated&&this.store.state.explorationEnabled===true,permissions:simulated?['read','search','browse']:[],maxRequests:20};if(id==='xiaohongshu-browser')config.social={...config.social,sessionIds:this.store.state.activitySessionId?[this.store.state.activitySessionId]:[]};this.platforms.configure(id,config);}
+    for(const {id,simulated,social} of this.platforms.list()){const config=this.store.snapshot().platforms[id]??{enabled:simulated&&this.store.state.explorationEnabled===true,permissions:simulated?['read','search','browse']:[],maxRequests:20};if(social)config.social={...config.social,sessionIds:this.store.state.activitySessionId?[this.store.state.activitySessionId]:[]};this.platforms.configure(id,config);}
   }
   savePlatform(input){return Promise.resolve().then(()=>{
     const wasApplied=this.runningRevision===this.store.state.revision;
@@ -148,7 +149,7 @@ export class CoreRuntime {
   });}
   platformAction(input){return this.serial(async()=>{
     if(this.status!=='ready')throw Error('CORE_NOT_READY');
-    if(input.id!=='xiaohongshu-browser'||!['like','comment','reply'].includes(input.operation))throw Error('CORE_PLATFORM_DENIED');
+    if(this.platforms.entries.get(input.id)?.adapter.socialWrites!==true||!['like','comment','reply'].includes(input.operation))throw Error('CORE_PLATFORM_DENIED');
     return this.activity.explore(({step})=>step===0?{platform:input.id,operation:input.operation,input:input.input}:null,{maxSteps:1,maxDurationMs:30000});
   });}
   async accountAction(input){
