@@ -625,7 +625,10 @@ export class WakeHost {
     } catch {
       // Idle bookkeeping must never break event observation.
     }
-    if (event.type === 'user/message' && event.data?.source?.kind !== WAKE_SOURCE_KIND) {
+    // Only actual human input preempts an activity. Host runtime-context,
+    // time-context and skill-catalog messages are model-step metadata.
+    const inputKind = event.data?.source?.kind
+    if (event.type === 'user/message' && (inputKind === undefined || inputKind === 'user')) {
       // Real user turn wins over same-Session long activities. The Provider is
       // paused/checkpointed when supported; otherwise the activity stays
       // conservative unknown. Never cancel or resend.
