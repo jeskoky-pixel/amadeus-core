@@ -11,8 +11,7 @@ import { CoreStore, MODULES, atomicJson } from './store.js';
 import { acquireLease, legacyConflicts, installLegacyGuard } from './ownership.js';
 import { host, member, assertIdle } from './host.js';
 import { AccountManager } from '../platforms/accounts.js';
-import {BrowserVault} from '../platforms/browser-vault.js';
-import {makeXhsBrowserAdapter} from '../platforms/xhs-browser.js';
+import {makeXhsNativeAdapter} from '../platforms/xhs-native-adapter.js';
 import {socialPolicy} from '../platforms/social-journal.js';
 import {makeBilibiliAdapter} from '../platforms/bilibili.js';
 import {makeXiaohongshuAdapter} from '../platforms/xiaohongshu.js';
@@ -49,7 +48,7 @@ export class CoreRuntime {
     this.activeConfigs={};
     this.runningRevision = null; this.tail = Promise.resolve();
     this.accounts=new AccountManager({file:path.join(root,'platform-accounts.json'),workspaceId:()=>this.store.state.workspaceId});
-    const real=[makeXhsBrowserAdapter({vault:new BrowserVault({root:path.join(root,'browser-vault'),workspaceId:()=>this.store.state.workspaceId})}),makeBilibiliAdapter(),makeXiaohongshuAdapter({transport:createPlatformTransport({allowedOrigins:['https://openaccount.xiaohongshu.com']})})];
+    const real=[makeXhsNativeAdapter({root:path.join(root,'xhs-executor'),workspaceId:()=>this.store.state.workspaceId}),makeBilibiliAdapter(),makeXiaohongshuAdapter({transport:createPlatformTransport({allowedOrigins:['https://openaccount.xiaohongshu.com']})})];
     this.platforms=new PlatformRegistry({budgetFile:path.join(root,'platform-budget.json'),journalFile:path.join(root,'platform-actions.json'),trustedRealAdapters:real,accounts:this.accounts,authorizeIdentity:identity=>member(this.ctx,this.store.state.workspaceId===identity?.workspaceId?identity.workspaceId:null,identity?.sessionId)});
     for(const adapter of real){this.accounts.register(adapter);this.platforms.register(adapter);}
     this.platforms.register(makeBilibiliMock());this.platforms.register(makeXiaohongshuMock());
@@ -168,7 +167,7 @@ export class CoreRuntime {
       case 'verify':return this.accounts.verify(id);
       case 'refresh':return this.accounts.verify(id,{refresh:true});
       case 'logout':return this.accounts.logout(id);
-      case 'clear':return this.accounts.logout(id,{clear:true});
+      case 'clear':await this.accounts.clearSession(id);return this.accounts.logout(id,{clear:true});
       case 'revoke':return this.accounts.revoke(id);
       default:throw Error('CORE_PLATFORM_INPUT');
     }
@@ -253,7 +252,7 @@ export class CoreRuntime {
     });
   }
   overview() {
-    return { version: '0.2.0-alpha.5', status: this.status, problem: this.problem,
+    return { version: '0.2.0-alpha.6', status: this.status, problem: this.problem,
       workspaceId: this.store.state.workspaceId, revision: this.store.state.revision,
       runningRevision: this.runningRevision, pendingRestart: this.store.state.revision !== this.runningRevision,
       modules: Object.fromEntries(MODULES.map(n => [n, { enabled: this.store.state.modules[n].enabled, mounted: this.handles.has(n) }])),
@@ -294,5 +293,5 @@ export class CoreRuntime {
   });}
   importData(input){return this.serial(()=>importData(this,input));}
   rollbackData(input){return this.serial(()=>rollbackData(this,input));}
-  async dispose() { this.status='stopping';this.accounts.dispose();await this.mcp.dispose();await this.tail; await this.stopModules(); this.release?.(); this.release = null; this.removeLegacyGuard?.();this.status = 'stopped'; }
+  async dispose() { this.status='stopping';await this.accounts.dispose();await this.mcp.dispose();await this.tail; await this.stopModules(); this.release?.(); this.release = null; this.removeLegacyGuard?.();this.status = 'stopped'; }
 }

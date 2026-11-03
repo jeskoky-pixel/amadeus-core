@@ -11,3 +11,5 @@ dist/
 .env*
 .credentials*
 
+
+lib/xhs/*.exe

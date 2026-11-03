@@ -12,3 +12,11 @@ test('write uses exact target, authorization and never retries uncertain respons
  await assert.rejects(c.execute('like',{id,xsecToken:'synthetic',liked:true},{accountId:'other',assertAuthorized:()=>{}}),/IDENTITY_MISMATCH/);assert.equal(writes,1);
 });
 test('QR external URLs and oversized response are refused',async()=>{const c=new XhsLocalClient({token:()=> 'fixture',fetchImpl:async()=>ok({img:'https://example.com/qr'})});await assert.rejects(c.beginLogin(),/INVALID_QR/);const large=new XhsLocalClient({token:()=> 'fixture',fetchImpl:async()=>new Response('x'.repeat(2100000))});await assert.rejects(large.account(),/RESPONSE_LIMIT/);});
+
+test('social routes validate exact provider receipts and do not accept mismatched replies',async()=>{
+ const id='a'.repeat(24),commentId='b'.repeat(24);let mismatch=false;const requests=[];
+ const c=new XhsLocalClient({token:()=> 'synthetic',fetchImpl:async(url,opt)=>{if(url.endsWith('/login/status'))return ok({is_logged_in:true,user_id:'actor'});requests.push({url,body:JSON.parse(opt.body)});return ok({success:true,feed_id:id,target_comment_id:mismatch?'c'.repeat(24):commentId});}});
+ for(const operation of ['like','comment','reply']){const value=await c.execute(operation,{id,commentId,xsecToken:'synthetic',liked:true,text:'Synthetic comment'},{accountId:'actor',assertAuthorized:()=>{}});assert.equal(value.providerAcknowledged,true);assert.equal(value.operation,operation);assert.equal(value.contentId,id);}
+ assert.equal(requests[0].body.unlike,false);assert.equal(requests[2].body.comment_id,commentId);assert.equal(requests[2].body.user_id,undefined);
+ mismatch=true;await assert.rejects(c.execute('reply',{id,commentId,xsecToken:'synthetic',text:'Synthetic reply'},{accountId:'actor',assertAuthorized:()=>{}}),/ACTION_UNKNOWN/);assert.equal(requests.length,4);
+});

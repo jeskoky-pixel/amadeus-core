@@ -28,3 +28,8 @@ Only Core orchestration/platform/UI files changed; retained module algorithms/sc
 
 ## Core alpha.2 presentation adapters
 Core-only build replaces State standalone subtitle with Core state module wording. Scoped Life/State CSS and same-origin Persona embed CSS unify presentation and secondary navigation; original module sources, storage and behavior are retained. Memory appearance is exempt from the redesign.
+
+
+### Alpha 0.6 Windows XHS executor adaptation
+
+Pinned upstream v2.7.0 platform parsing/actions remain external executor code (Apache-2.0). services/xhs-executor overlays replace the browser factory (signed installed Edge, incognito context, suspended launch + Windows kill-on-close Job Object) and cookie I/O (DPAPI before disk, atomic replacement, encrypted backup, corrupt-input refusal). The original blocked helper is never restored or extracted. A service Host stdin pipe closes on Host death. Authenticated loopback is mandatory. Core reuses its existing Registry, accounts, ACL, budgets, Activity and Experience ledger; new native calls are read-only and keep the persistent xiaohongshu-browser ID. Native QR images are validated rather than re-encoded as an unrelated URL QR. Identity-pending is not logout. Main user migration/real-account acceptance remains separate evidence.

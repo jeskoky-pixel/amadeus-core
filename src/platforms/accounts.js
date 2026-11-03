@@ -34,7 +34,7 @@ export class AccountManager {
   invalidate(id){this.#errors.delete(id);this.#epochs.set(id,this.epoch(id)+1);this.#pending.delete(id);for(const [k,s] of this.#secrets)if(s.platformId===id)this.#secrets.delete(k);}
   persist(){atomicJson(this.file,this.state);}
   list(id){return this.state.accounts.filter(a=>a.platformId===id&&a.workspaceId===this.workspaceId()).map(a=>({...a,status:a.expiresAt<=this.now()?'credentials_expired':a.status}));}
-  status(id){const p=this.#pending.get(id);return {loginError:this.#errors.get(id)??null,managedByHost:this.#watcher!==null,storage:this.#adapters.get(id)?.storage??'session-only',hasSavedLogin:this.#adapters.get(id)?.hasSavedLogin?.()??false,canRefresh:!!this.context(id,{allowExpired:true})?.credentials?.refreshToken,accounts:this.list(id),pending:p?{...p.public,loginId:p.loginId}:null};}
+  status(id){const p=this.#pending.get(id);return {loginError:this.#errors.get(id)??null,managedByHost:this.#watcher!==null,storage:this.#adapters.get(id)?.storage??'session-only',diagnostics:this.#adapters.get(id)?.diagnosticStatus?.()??null,hasSavedLogin:this.#adapters.get(id)?.hasSavedLogin?.()??false,canRefresh:!!this.context(id,{allowExpired:true})?.credentials?.refreshToken,accounts:this.list(id),pending:p?{...p.public,loginId:p.loginId}:null};}
   async ensure(id){
     if(this.context(id))return;
     const adapter=this.#adapters.get(id),workspaceId=this.workspaceId(),epoch=this.epoch(id);
@@ -58,7 +58,9 @@ export class AccountManager {
     const pub=result.public;
     if(!pub||!Number.isFinite(pub.expiresAt)||pub.expiresAt<=this.now()||typeof pub.verificationUrl!=='string')fail('INVALID_RESPONSE');
     const loginId=randomUUID();
-    const qrDataUrl=pub.method==='dedicated-browser'?null:await QRCode.toDataURL(pub.verificationUrl,{width:240,margin:2});
+    let qrDataUrl=null;
+    if(pub.method==='local-service-qr'){if(pub.qrDataUrl!==null&&(typeof pub.qrDataUrl!=='string'||!/^data:image\/(png|jpeg);base64,[A-Za-z0-9+/=]+$/.test(pub.qrDataUrl)||pub.qrDataUrl.length>1500000))fail('INVALID_QR');qrDataUrl=pub.qrDataUrl;}
+    else if(pub.method!=='dedicated-browser')qrDataUrl=await QRCode.toDataURL(pub.verificationUrl,{width:240,margin:2});
     if(epoch!==this.epoch(id))fail('REVOKED');
     this.#pending.set(id,{private:result.private,public:{method:pub.method??null,qrDataUrl,verificationUrl:pub.verificationUrl,userCode:pub.userCode??null,expiresAt:pub.expiresAt,intervalMs:Math.max(1000,pub.intervalMs??2000)},workspaceId,loginId,nextPoll:0});
     return this.status(id);
@@ -105,7 +107,7 @@ export class AccountManager {
       if(result.identity.accountId!==c.accountId)fail('IDENTITY_MISMATCH');
       if(result.credentials){const key=JSON.stringify([this.workspaceId(),id,c.accountId]);this.#secrets.set(key,{platformId:id,credentials:result.credentials});const row=this.state.accounts.find(a=>a.platformId===id&&a.accountId===c.accountId&&a.workspaceId===this.workspaceId());row.expiresAt=result.expiresAt;row.status='authenticated';this.persist();}
       return this.status(id);
-    }catch(e){this.logout(id);throw e;}
+    }catch(e){if(['CORE_PLATFORM_IDENTITY_MISMATCH','CORE_PLATFORM_CREDENTIALS_EXPIRED','CORE_PLATFORM_INVALID_CREDENTIALS'].includes(e.message))this.logout(id);throw e;}
   }
   logout(id,{clear=false}={}) {
     this.invalidate(id);
@@ -121,5 +123,6 @@ export class AccountManager {
     if(!adapter.revokeAccount)return {remote:'unsupported',...this.status(id)};
     await adapter.revokeAccount(c.credentials,{});return {remote:'revoked',...this.status(id)};
   }
-  dispose(){clearInterval(this.#watcher);this.#watcher=null;for(const adapter of this.#adapters.values())Promise.resolve(adapter.dispose?.()).catch(()=>{});this.#secrets.clear();this.#pending.clear();for(const id of this.#adapters.keys())this.#epochs.set(id,this.epoch(id)+1);}
+  async clearSession(id){this.invalidate(id);await this.#adapters.get(id)?.clearSession?.();}
+  async dispose(){clearInterval(this.#watcher);this.#watcher=null;const tasks=[...this.#adapters.values()].map(adapter=>Promise.resolve(adapter.dispose?.()).catch(()=>{}));this.#secrets.clear();this.#pending.clear();for(const id of this.#adapters.keys())this.#epochs.set(id,this.epoch(id)+1);await Promise.all(tasks);}
 }

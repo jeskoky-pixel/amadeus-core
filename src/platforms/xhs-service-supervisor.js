@@ -6,7 +6,7 @@ import { createHash, randomBytes } from 'node:crypto';
 // upstream service, opens a socket, kills a process or writes user data by
 // itself. It is not registered as a live platform and must not be reported as
 // verified platform support.
-export const XHS_SERVICE_VERSION = 'v2.7.0';
+export const XHS_SERVICE_VERSION = 'v2.7.0-amadeus.1';
 export const XHS_SERVICE_HOST = '127.0.0.1';
 
 const TOKEN_BYTES = 32;
