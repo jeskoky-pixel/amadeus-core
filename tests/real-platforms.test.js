@@ -111,3 +111,10 @@ test('Bilibili accepts current and legacy official scan URLs without relaxing de
  const adapter=makeBilibiliAdapter({transport:{request:async()=>({code:0,data:{url:'https://account.bilibili.com/h5/account-h5/auth/scan-web',qrcode_key:''}})}});
  await assert.rejects(adapter.beginLogin({method:'web-qr',acceptWebAdapter:true}),/INVALID_RESPONSE/);
 });
+
+test('protected account revalidates on in-process expiry without requiring restart',async t=>{
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),'core-account-expiry-'));t.after(()=>fs.rmSync(root,{recursive:true,force:true}));let now=1,restores=0;
+ const m=new AccountManager({file:path.join(root,'accounts.json'),workspaceId:()=> 'w',now:()=>now});
+ m.register({id:'protected',beginLogin:async()=>({private:{},public:{verificationUrl:'https://example.com',expiresAt:10000}}),pollLogin:async()=>({identity:{accountId:'fixture'},credentials:{cookie:'synthetic'},expiresAt:20}),restoreLogin:async({accountId})=>{restores++;return {identity:{accountId},credentials:{cookie:'restored-synthetic'},expiresAt:now+100};}});
+ const p=await m.begin('protected');await m.poll('protected',p.pending.loginId);now=30;assert.equal(m.context('protected'),null);await m.ensure('protected');assert.equal(restores,1);assert.equal(m.context('protected').accountId,'fixture');m.logout('protected');await m.ensure('protected');assert.equal(restores,1);assert.equal(m.context('protected'),null);
+});

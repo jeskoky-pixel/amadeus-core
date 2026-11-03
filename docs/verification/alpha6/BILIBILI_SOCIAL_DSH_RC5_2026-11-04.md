@@ -12,7 +12,7 @@ Windows Bilibili login is now DPAPI-persisted after the next successful scan, re
 
 ## Validation
 
-- Core: 207 passed.
+- Core: 208 passed.
 - Four modules: Memory 2714 passed / 1 Windows skip; Life 213; State 143; Persona 49.
 - Real headless browser protocol/DOM fixtures: 2 passed; all platform traffic intercepted, not live account evidence.
 - Build/package inventory checks passed; no new production dependency or schema reset.
@@ -25,3 +25,4 @@ A stopped backup of the rc.3 installation, full Core data and Profile manifests 
 ## Remaining acceptance boundaries
 
 New-account QR verification is required once to populate the Bilibili DPAPI vault. Bilibili live like/comment/reply and subsequent account recovery were not executed without that login. Earlier anonymous public reads passed browse/details/related; comments/search encountered website risk control. Protocol fixtures do not establish those live operations succeed. Current main is not replaced: changes remain on Draft PR #3.
+

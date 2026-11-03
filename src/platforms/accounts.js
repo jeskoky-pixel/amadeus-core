@@ -38,7 +38,7 @@ export class AccountManager {
   async ensure(id){
     if(this.context(id))return;
     const adapter=this.#adapters.get(id),workspaceId=this.workspaceId(),epoch=this.epoch(id);
-    const row=this.state.accounts.find(a=>a.platformId===id&&a.workspaceId===workspaceId&&a.status==='credentials_expired');
+    const row=this.state.accounts.find(a=>a.platformId===id&&a.workspaceId===workspaceId&&(a.status==='credentials_expired'||(a.status==='authenticated'&&a.expiresAt<=this.now())));
     if(!row||!adapter?.restoreLogin)return;
     const result=await adapter.restoreLogin({accountId:row.accountId});
     if(epoch!==this.epoch(id)||workspaceId!==this.workspaceId())fail('REVOKED');

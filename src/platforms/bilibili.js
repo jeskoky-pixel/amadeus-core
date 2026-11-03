@@ -24,7 +24,7 @@ export function makeBilibiliAdapter({transport=createPlatformTransport({allowedO
     return {action,csrf,prior};
   }
   return Object.freeze({id:'bilibili',contractVersion:2,mode:'real',version:'0.3.0',name:'Bilibili',category:'video',
-    description:'Bilibili web read adapter; not an Open Platform OAuth SDK',authMethods:['web-qr'],
+    description:'Bilibili web adapter; not an Open Platform OAuth SDK',authMethods:['web-qr'],
     capabilities:['browse','search','read','comments','related','like','comment','reply'],requiresAccount:false,
     socialWrites:true,socialTargetKind:'bilibili-video',storage:vault?'windows-dpapi':'session-only',
     preflightAction:preflight,
