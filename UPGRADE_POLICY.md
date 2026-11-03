@@ -1,6 +1,6 @@
 # Upgrade policy
 
-Core is an unreleased `0.2.0-alpha.1` candidate. It is not a replacement recommendation for production yet.
+Core is an unreleased `0.2.0-alpha.3` candidate. It is not a replacement recommendation for production yet.
 
 Code and user data are separate. The default data root is `DSH_HOME/amadeus-core`, not the npm installation directory. Disabling/uninstalling the Bundle must not remove this directory. Module data formats remain Memory SQLite/ACL 2, Life SQLite 10, State SQLite 2 and Persona JSON 1; Core metadata is JSON schema 1.
 
@@ -17,3 +17,5 @@ Dedicated XHS browser addendum: module schemas are unchanged. Additive `platform
 
 ## Alpha 0.2.0-alpha.2 login persistence
 This addendum supersedes the session-only statements above **only for the dedicated Xiaohongshu browser**. `browser-vault/<workspace-sha256>-session.json` and `-login.json` use envelope schema 1 and Windows CurrentUser DPAPI. They live in the Core user data root, outside the package. No module schema changes. Back up the complete stopped Core directory and Profile before replacement; restore the matching package and snapshot for rollback. Encrypted data requires the same Windows user/DPAPI keys; copying it to another computer is not a portable login backup. Old alpha.1 in-memory cookies cannot be recovered: log in once after upgrade. Platform expiry requires a new login. Bilibili/open-platform grants remain session-only. Logout removes the browser session; separately deleting saved login details removes the optional account/password. Disable/uninstall retains data. Linux has no production secure-storage implementation in this candidate and must report unsupported rather than write plaintext.
+
+Alpha.2 → alpha.3 fixes login polling only; no schema or data migration. Preserve the full data directory and Profile backup when replacing the package.

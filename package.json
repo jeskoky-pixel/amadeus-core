@@ -1,6 +1,6 @@
 {
   "name": "@fg-lab/amadeus-core",
-  "version": "0.2.0-alpha.2",
+  "version": "0.2.0-alpha.3",
   "private": true,
   "description": "Unified modular Amadeus Core for DSH; development candidate",
   "license": "MIT",

@@ -317,6 +317,10 @@ test('pollLogin stays pending with no fake QR and rejects a stale generation', a
   const browser = makeFakeBrowser({ selfStatus: 401 });
   const adapter = makeXhsBrowserAdapter({ launch: async () => browser, now: () => NOW });
   const loginResult = await adapter.beginLogin({ acceptBrowser: true });
+  const page = browser.pages[0];
+  page.reload = async () => { throw Error('LOGIN_POLL_MUST_NOT_RELOAD'); };
+  page.goto = async () => { throw Error('LOGIN_POLL_MUST_NOT_NAVIGATE'); };
+  for(let i=0;i<5;i++) assert.deepEqual(await adapter.pollLogin(loginResult.private), {pending:true,scanned:false});
   const pending = await adapter.pollLogin(loginResult.private);
   assert.deepEqual(pending, { pending: true, scanned: false });
   assert.equal('credentials' in pending, false);

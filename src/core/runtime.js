@@ -252,7 +252,7 @@ export class CoreRuntime {
     });
   }
   overview() {
-    return { version: '0.2.0-alpha.2', status: this.status, problem: this.problem,
+    return { version: '0.2.0-alpha.3', status: this.status, problem: this.problem,
       workspaceId: this.store.state.workspaceId, revision: this.store.state.revision,
       runningRevision: this.runningRevision, pendingRestart: this.store.state.revision !== this.runningRevision,
       modules: Object.fromEntries(MODULES.map(n => [n, { enabled: this.store.state.modules[n].enabled, mounted: this.handles.has(n) }])),

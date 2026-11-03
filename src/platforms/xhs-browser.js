@@ -718,8 +718,9 @@ export function makeXhsBrowserAdapter({ launch, vault=null, now = () => Date.now
     }
 
     await assertNoChallenge(pending.page, { allowLogin: true });
-    let identity = pending.identity;
-    if (!identity) identity = await readSelf(pending.page);
+    // Login polling only observes the website's self-response listener. Reloading
+    // here replaces QR codes and interrupts SMS input before login completes.
+    const identity = pending.identity;
     if (!identity) return { pending: true, scanned: false };
     if (pending.identity && pending.identity.accountId !== identity.accountId) fail('IDENTITY_MISMATCH');
 
