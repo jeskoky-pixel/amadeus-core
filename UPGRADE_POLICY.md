@@ -1,6 +1,6 @@
 # Upgrade policy
 
-Core is an unreleased `0.2.0-alpha.4` candidate. It is not a replacement recommendation for production yet.
+Core is an unreleased `0.2.0-alpha.5` candidate. It is not a replacement recommendation for production yet.
 
 Code and user data are separate. The default data root is `DSH_HOME/amadeus-core`, not the npm installation directory. Disabling/uninstalling the Bundle must not remove this directory. Module data formats remain Memory SQLite/ACL 2, Life SQLite 10, State SQLite 2 and Persona JSON 1; Core metadata is JSON schema 1.
 

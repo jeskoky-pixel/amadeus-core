@@ -17,3 +17,14 @@ test('lost login is cleared while a late old failure cannot clear a newer login'
  const first=await m.begin('x');await assert.rejects(m.poll('x',first.pending.loginId),/LOGIN_MISSING/);assert.equal(m.status('x').pending,null);
  delayed=true;const old=await m.begin('x'),flight=m.poll('x',old.pending.loginId);const latest=await m.begin('x');rejectOld(Error('CORE_PLATFORM_LOGIN_MISSING'));await assert.rejects(flight,/LOGIN_MISSING/);assert.equal(m.status('x').pending.loginId,latest.pending.loginId);
 });
+
+
+test('Host confirms login without UI polling and stops its watcher on dispose',async t=>{
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),'core-host-login-'));t.after(()=>fs.rmSync(root,{recursive:true,force:true}));let loggedIn=false,calls=0;
+ const file=path.join(root,'accounts.json'),m=new AccountManager({file,workspaceId:()=> 'w'});t.after(()=>m.dispose());
+ m.register({id:'x',beginLogin:async()=>({private:{},public:{method:'dedicated-browser',verificationUrl:'https://example.com',expiresAt:Date.now()+60000}}),pollLogin:async()=>{calls++;return loggedIn?{identity:{accountId:'synthetic'},credentials:{private:'not-returned'},expiresAt:Date.now()+60000}:{pending:true};}});
+ await m.begin('x');loggedIn=true;m.start({intervalMs:10});
+ const deadline=Date.now()+2000;while(!m.context('x')&&Date.now()<deadline)await new Promise(r=>setTimeout(r,20));
+ assert.equal(m.context('x').accountId,'synthetic');assert.equal(m.status('x').pending,null);assert.equal(JSON.parse(fs.readFileSync(file)).accounts[0].status,'authenticated');assert.ok(!fs.readFileSync(file,'utf8').includes('not-returned'));
+ m.dispose();const before=calls;await new Promise(r=>setTimeout(r,40));assert.equal(calls,before);assert.equal(m.status('x').managedByHost,false);
+});

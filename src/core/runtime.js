@@ -66,6 +66,7 @@ export class CoreRuntime {
       await this.mount();
       await this.mcp.start();
       await this.accounts.restore();
+      this.accounts.start();
     } catch (e) { this.status = 'blocked'; this.ctx.logger?.error?.('Core mount failed', this.mountingModule, e); atomicJson(path.join(this.root,'last-error.private.json'),{module:this.mountingModule,message:e.message,stack:e.stack}); this.problem = 'CORE_MOUNT_FAILED: ' + (this.mountingModule ?? 'runtime'); await this.stopModules(); }
   }
   async stopModules() {
@@ -252,7 +253,7 @@ export class CoreRuntime {
     });
   }
   overview() {
-    return { version: '0.2.0-alpha.4', status: this.status, problem: this.problem,
+    return { version: '0.2.0-alpha.5', status: this.status, problem: this.problem,
       workspaceId: this.store.state.workspaceId, revision: this.store.state.revision,
       runningRevision: this.runningRevision, pendingRestart: this.store.state.revision !== this.runningRevision,
       modules: Object.fromEntries(MODULES.map(n => [n, { enabled: this.store.state.modules[n].enabled, mounted: this.handles.has(n) }])),

@@ -1,4 +1,4 @@
-# Amadeus Core 0.2.0-alpha.4
+# Amadeus Core 0.2.0-alpha.5
 
 开发候选，尚未发布。一个 DSH Bundle 内保留 Memory 1.3.0、Life 1.2.1、State 1.2.0、Persona 1.2.0 的实现与数据结构；QQ 继续独立。
 

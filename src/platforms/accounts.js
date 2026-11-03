@@ -7,6 +7,7 @@ const fail=code=>{throw Error(`CORE_PLATFORM_${code}`);};
 // Only account metadata is durable. Secrets and pending login challenges are
 // process-local until a tested Host secure-storage contract is available.
 export class AccountManager {
+  #watcher=null; #watching=false; #errors=new Map();
   #secrets=new Map(); #pending=new Map(); #adapters=new Map(); #epochs=new Map();
   constructor({file,workspaceId,now=()=>Date.now()}) {
     this.file=file;this.workspaceId=workspaceId;this.now=now;
@@ -15,11 +16,25 @@ export class AccountManager {
     for(const a of this.state.accounts)if(a.status==='authenticated')a.status='credentials_expired';
   }
   register(adapter){if(this.#adapters.has(adapter.id))fail('DUPLICATE');this.#adapters.set(adapter.id,adapter);}
+  start({intervalMs=1000}={}){
+    if(this.#watcher)return;
+    if(!Number.isSafeInteger(intervalMs)||intervalMs<10)fail('INPUT');
+    this.#watcher=setInterval(()=>{void this.checkPending();},intervalMs);this.#watcher.unref?.();
+  }
+  async checkPending(){
+    if(this.#watching)return;this.#watching=true;
+    try{for(const [id,p] of [...this.#pending]){
+      if(p.workspaceId!==this.workspaceId()){if(this.#pending.get(id)===p)this.#pending.delete(id);continue;}
+      const epoch=this.epoch(id);
+      try{await this.poll(id,p.loginId);if(epoch===this.epoch(id))this.#errors.delete(id);}
+      catch(e){if(epoch===this.epoch(id))this.#errors.set(id,/^CORE_PLATFORM_[A-Z0-9_]+$/.test(e.message)?e.message:'CORE_PLATFORM_LOGIN_CHECK_FAILED');}
+    }}finally{this.#watching=false;}
+  }
   epoch(id){return this.#epochs.get(id)??0;}
-  invalidate(id){this.#epochs.set(id,this.epoch(id)+1);this.#pending.delete(id);for(const [k,s] of this.#secrets)if(s.platformId===id)this.#secrets.delete(k);}
+  invalidate(id){this.#errors.delete(id);this.#epochs.set(id,this.epoch(id)+1);this.#pending.delete(id);for(const [k,s] of this.#secrets)if(s.platformId===id)this.#secrets.delete(k);}
   persist(){atomicJson(this.file,this.state);}
   list(id){return this.state.accounts.filter(a=>a.platformId===id&&a.workspaceId===this.workspaceId()).map(a=>({...a,status:a.expiresAt<=this.now()?'credentials_expired':a.status}));}
-  status(id){const p=this.#pending.get(id);return {storage:this.#adapters.get(id)?.storage??'session-only',hasSavedLogin:this.#adapters.get(id)?.hasSavedLogin?.()??false,canRefresh:!!this.context(id,{allowExpired:true})?.credentials?.refreshToken,accounts:this.list(id),pending:p?{...p.public,loginId:p.loginId}:null};}
+  status(id){const p=this.#pending.get(id);return {loginError:this.#errors.get(id)??null,managedByHost:this.#watcher!==null,storage:this.#adapters.get(id)?.storage??'session-only',hasSavedLogin:this.#adapters.get(id)?.hasSavedLogin?.()??false,canRefresh:!!this.context(id,{allowExpired:true})?.credentials?.refreshToken,accounts:this.list(id),pending:p?{...p.public,loginId:p.loginId}:null};}
   async ensure(id){
     if(this.context(id))return;
     const adapter=this.#adapters.get(id),workspaceId=this.workspaceId(),epoch=this.epoch(id);
@@ -106,5 +121,5 @@ export class AccountManager {
     if(!adapter.revokeAccount)return {remote:'unsupported',...this.status(id)};
     await adapter.revokeAccount(c.credentials,{});return {remote:'revoked',...this.status(id)};
   }
-  dispose(){for(const adapter of this.#adapters.values())Promise.resolve(adapter.dispose?.()).catch(()=>{});this.#secrets.clear();this.#pending.clear();for(const id of this.#adapters.keys())this.#epochs.set(id,this.epoch(id)+1);}
+  dispose(){clearInterval(this.#watcher);this.#watcher=null;for(const adapter of this.#adapters.values())Promise.resolve(adapter.dispose?.()).catch(()=>{});this.#secrets.clear();this.#pending.clear();for(const id of this.#adapters.keys())this.#epochs.set(id,this.epoch(id)+1);}
 }

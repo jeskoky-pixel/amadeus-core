@@ -1,3 +1,4 @@
+import {AccountManager} from '../../src/platforms/accounts.js';
 import fs from 'node:fs';import os from 'node:os';import path from 'node:path';import {BrowserVault} from '../../src/platforms/browser-vault.js';
 import test from 'node:test';import assert from 'node:assert/strict';import {chromium} from 'playwright-core';import {makeXhsBrowserAdapter} from '../../src/platforms/xhs-browser.js';
 const id='a'.repeat(24),parent='b'.repeat(24),child='c'.repeat(24),actor='test-user';
@@ -51,5 +52,10 @@ test('login polling preserves QR document and typed SMS input until website conf
  for(let i=0;i<5;i++){assert.deepEqual(await adapter.pollLogin(challenge.private),{pending:true,scanned:false});assert.equal(await page.locator('#sms').inputValue(),'synthetic-input');assert.equal(documents,1);}
  authenticated=true;await page.evaluate(()=>fetch('/api/sns/web/v1/user/self'));let account;for(let i=0;i<20;i++){account=await adapter.pollLogin(challenge.private);if(!account.pending)break;await page.waitForTimeout(50);}
  assert.equal(account.identity.accountId,'synthetic-login');assert.equal(documents,1);assert.equal(await page.locator('#sms').inputValue(),'synthetic-input');
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),'core-host-browser-'));
+ const manager=new AccountManager({file:path.join(root,'accounts.json'),workspaceId:()=> 'fixture'});
+ manager.register({...adapter,id:'x',beginLogin:async()=>({private:challenge.private,public:{method:'dedicated-browser',verificationUrl:'https://www.xiaohongshu.com/explore',expiresAt:Date.now()+60000}}),logout:undefined});
+ try{await manager.begin('x');manager.start({intervalMs:10});const deadline=Date.now()+2000;while(!manager.context('x')&&Date.now()<deadline)await new Promise(r=>setTimeout(r,20));assert.equal(manager.context('x').accountId,'synthetic-login');assert.equal(documents,1);}finally{manager.dispose();fs.rmSync(root,{recursive:true,force:true});}
+
  }finally{await adapter.dispose();await browser.close();}
 });
