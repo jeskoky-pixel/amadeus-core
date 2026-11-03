@@ -120,10 +120,11 @@ export class CoreRuntime {
     this.status = 'ready'; this.problem = null; this.runningRevision = settings.revision;
     this.bridges.life?.api.registerActivityProvider(this.activity);
     await this.activity.recover();
+    if(this.store.state.explorationEnabled&&this.bridges.life?.api&&this.bridges.memory?.unifiedRuntime)await this.activity.session();
     this.configureExplorationPlatforms();
   }
   configureExplorationPlatforms(){
-    for(const {id,simulated} of this.platforms.list())this.platforms.configure(id,this.store.state.platforms[id]??{enabled:simulated&&this.store.state.explorationEnabled===true,permissions:simulated?['read','search','browse']:[],maxRequests:20});
+    for(const {id,simulated} of this.platforms.list()){const config=this.store.snapshot().platforms[id]??{enabled:simulated&&this.store.state.explorationEnabled===true,permissions:simulated?['read','search','browse']:[],maxRequests:20};if(id==='xiaohongshu-browser')config.social={...config.social,sessionIds:this.store.state.activitySessionId?[this.store.state.activitySessionId]:[]};this.platforms.configure(id,config);}
   }
   savePlatform(input){return Promise.resolve().then(()=>{
     const wasApplied=this.runningRevision===this.store.state.revision;
@@ -131,7 +132,7 @@ export class CoreRuntime {
     if(!entry||!c||(c.autonomous!==undefined&&typeof c.autonomous!=='boolean')||(c.minIntervalMs!==undefined&&(!Number.isSafeInteger(c.minIntervalMs)||c.minIntervalMs<0||c.minIntervalMs>3600000))||typeof c.enabled!=='boolean'||!Array.isArray(c.permissions)||c.permissions.some(p=>!entry.adapter.capabilities.includes(p))||!Number.isSafeInteger(c.maxRequests)||c.maxRequests<1||c.maxRequests>1000)throw Error('CORE_PLATFORM_CONFIG');
     const social=socialPolicy(c.social);
     this.store.update(input.revision,s=>{s.platforms[input.id]={enabled:c.enabled,permissions:[...new Set(c.permissions)],maxRequests:c.maxRequests,autonomous:c.autonomous??entry.adapter.simulated===true,minIntervalMs:c.minIntervalMs??0,social};});
-    this.platforms.configure(input.id,this.store.state.platforms[input.id]);if(wasApplied)this.runningRevision=this.store.state.revision;return this.overview();
+    this.configureExplorationPlatforms();if(wasApplied)this.runningRevision=this.store.state.revision;return this.overview();
   });}
   dryRunPlatform(input){return this.serial(async()=>{
     if(this.status!=='ready')throw Error('CORE_NOT_READY');
@@ -174,7 +175,7 @@ export class CoreRuntime {
   }
   prepareExploration(){return this.serial(async()=>{
     if(this.status!=='ready')throw Error('CORE_NOT_READY');
-    const session=await this.activity.session();return {sessionId:session.id};
+    const session=await this.activity.session();this.configureExplorationPlatforms();return {sessionId:session.id};
   });}
   effectiveConfig(n) {
     if (!MODULES.includes(n)) throw Error('CORE_MODULE_INVALID');

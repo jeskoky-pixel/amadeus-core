@@ -68,6 +68,7 @@ export class CoreActivity extends LocalVirtualProvider {
     const session=member(r.ctx,s.workspaceId,result.sessionId);
     r.store.update(r.store.state.revision,next=>{next.activitySessionId=session.id;next.activitySessionCreating=false;});
     if(wasApplied)r.runningRevision=r.store.state.revision;
+    r.configureExplorationPlatforms?.();
     if(r.bridges.life.api.getWorkspaceView?.().binding?.workspaceId!==s.workspaceId)
       r.bridges.life.api.bindWorkspace({workspaceId:s.workspaceId});
     return session;

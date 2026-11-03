@@ -9,6 +9,8 @@ const reads=new Set(['browse','search','read','comments']);
 const writes=new Set(['like','comment','reply']);
 export function makeXhsNativeAdapter({root,workspaceId,serviceFactory=createNativeService,now=()=>Date.now()}){
  let active=null,starting=null,disposed=false,stage='not_configured';
+ const observed=new Map();
+ const scope=(credentials,identity)=>JSON.stringify([workspaceId(),credentials?.accountId,identity?.sessionId]);
  async function service(){
   if(disposed)fail('REVOKED');const workspace=workspaceId();if(!workspace)fail('WORKSPACE_REQUIRED');
   if(active?.workspace===workspace)return active;
@@ -32,9 +34,21 @@ export function makeXhsNativeAdapter({root,workspaceId,serviceFactory=createNati
   async beginLogin(input){if(input?.acceptBrowser!==true)fail('USER_CONSENT_REQUIRED');const a=await service();const status=await a.controller.begin();if(!status.pending&&!a.controller.identityPending)fail('LOGIN_START_FAILED');return {private:{workspace:a.workspace},public:{method:'local-service-qr',verificationUrl:'https://www.xiaohongshu.com',qrDataUrl:status.pending?.qrDataUrl??null,expiresAt:now()+240000,intervalMs:15000}};},
   async pollLogin(state){const a=await service();if(state.workspace!==a.workspace)fail('REVOKED');await a.controller.check();if(a.controller.state==='identity_verified')return result(a.controller.identity);if(a.controller.state==='login_expired')fail('CREDENTIALS_EXPIRED');return {pending:true};},
   restoreLogin:({accountId})=>validated(accountId),validateAccount:credentials=>validated(credentials?.accountId),
-  async execute(operation,input,{credentials,assertAuthorized,signal}={}){
+  async execute(operation,input,{credentials,identity,assertAuthorized,signal}={}){
    if(!reads.has(operation)&&!writes.has(operation))fail('UNSUPPORTED');const a=await service();
-   const value=await a.native.client.execute(operation,input,{accountId:credentials?.accountId,assertAuthorized,signal});
+   if(typeof assertAuthorized!=='function')fail('PERMISSION_REQUIRED');assertAuthorized();
+   const key=scope(credentials,identity);let seen=observed.get(key);
+   if(!seen){if(observed.size>=100)observed.delete(observed.keys().next().value);seen=new Map();observed.set(key,seen);}
+   const prior=seen.get(input?.id);
+   if(writes.has(operation)&&(!prior||now()-prior.at>3600000))fail('TARGET_NOT_OBSERVED');
+   const effective={...input,...((writes.has(operation)||!input?.xsecToken)&&prior?{xsecToken:prior.token}:{})};
+   const value=await a.native.client.execute(operation,effective,{accountId:credentials?.accountId,assertAuthorized,signal});
+   assertAuthorized();
+   if(reads.has(operation)){
+    const remember=(id,token)=>{if(/^[a-f0-9]{24}$/.test(id)&&typeof token==='string'&&token&&token.length<=4096){if(seen.size>=200)seen.delete(seen.keys().next().value);seen.set(id,{token,at:now()});}};
+    if(['browse','search'].includes(operation))for(const item of value.feeds??[])remember(item.id,item.xsecToken);
+    if(['read','comments'].includes(operation))remember(input?.id,effective.xsecToken);
+   }
    if(writes.has(operation)){if(value.providerAcknowledged!==true||value.operation!==operation||value.contentId!==input.id)fail('ACTION_UNKNOWN');return {status:'confirmed',operation,contentId:input.id,confirmation:'upstream-acknowledged',liveAcceptance:'pending'};}
    if(operation==='read'&&['identity_verified'].includes(a.controller.state))a.controller.recordRead({accountId:credentials.accountId,workspaceId:a.workspace,contentId:input.id,sourceUrl:'https://www.xiaohongshu.com/explore/'+input.id});
    // Bounded observation; never silently truncate a large platform response.
@@ -42,7 +56,7 @@ export function makeXhsNativeAdapter({root,workspaceId,serviceFactory=createNati
   },
   // Logout cancels work but retains encrypted bytes for explicit recovery; deleting
   // credentials is a separate Host action. Closing the UI never calls either.
-  async logout(){if(active){active.controller.cancel();await active.native.stop();active=null;stage='service_stopped';}},
+  async logout(){observed.clear();if(active){active.controller.cancel();await active.native.stop();active=null;stage='service_stopped';}},
   async clearSession(){
    const workspace=workspaceId();if(!workspace)fail('WORKSPACE_REQUIRED');
    if(active){await active.native.stop();active=null;}
@@ -52,6 +66,6 @@ export function makeXhsNativeAdapter({root,workspaceId,serviceFactory=createNati
    for(const target of [file,file+'.bak',path.join(dir,'account-binding.json')])if(fs.existsSync(target))fs.unlinkSync(target);
    stage='not_configured';
   },
-  async dispose(){disposed=true;if(starting)await starting.catch(()=>{});if(active)await active.native.stop();active=null;},
+  async dispose(){observed.clear();disposed=true;if(starting)await starting.catch(()=>{});if(active)await active.native.stop();active=null;},
  });
 }

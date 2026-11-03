@@ -24,7 +24,7 @@ export class SocialJournal {
  }
  reserve(platform,account,operation,input,identity,policy) {
   if(!this.file)fail('JOURNAL_REQUIRED');
-  if(!policy.noteIds.includes(input.id)||!policy.sessionIds.includes(identity.sessionId))fail('TARGET_DENIED');
+  if(!policy.sessionIds.includes(identity.sessionId))fail('TARGET_DENIED');
   const key=createHash('sha256').update(JSON.stringify([platform,account,operation,input])).digest('hex');
   if(this.state.entries.some(e=>e.key===key))fail('ACTION_ALREADY_RECORDED');
   if(this.state.entries.length>=10000)fail('JOURNAL_CAPACITY');

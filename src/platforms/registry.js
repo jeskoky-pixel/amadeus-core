@@ -77,7 +77,7 @@ export class PlatformRegistry {
       // Charge before dispatch; crashes/uncertain failures never refund a call.
       if(this.budgetFile)atomicJson(this.budgetFile,next);
       this.budget=next;e.used++;e.lastCall=this.now();
-      const result=await e.adapter.execute(operation,structuredClone(writing?{...actionInput,...(input.xsecToken?{xsecToken:input.xsecToken}:{})}:input),{signal:executionSignal,credentials:account?.credentials,assertAuthorized});
+      const result=await e.adapter.execute(operation,structuredClone(writing?{...actionInput,...(input.xsecToken?{xsecToken:input.xsecToken}:{})}:input),{signal:executionSignal,credentials:account?.credentials,identity:Object.freeze({...identity}),assertAuthorized});
       assertAuthorized();
       if(writing&&(result?.status!=='confirmed'||result.operation!==operation||result.contentId!==actionInput.id))throw Error('CORE_PLATFORM_ACTION_UNKNOWN');
       signal?.throwIfAborted();
