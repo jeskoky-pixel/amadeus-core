@@ -97,3 +97,17 @@ test('revocation during a real request rejects returned data',async()=>{
  const pending=r.execute(a.id,'read',{}, {workspaceId:'w',sessionId:'s',activityId:'a'});await new Promise(r=>setImmediate(r));
  r.configure(a.id,{enabled:false,permissions:[]});done({text:'late'});await assert.rejects(pending,/REVOKED/);
 });
+
+test('Bilibili accepts current and legacy official scan URLs without relaxing destination validation',async()=>{
+ for(const url of ['https://account.bilibili.com/h5/account-h5/auth/scan-web?auth_code=fixture','https://passport.bilibili.com/h5-app/passport/login/scan?fixture=1']){
+  const adapter=makeBilibiliAdapter({transport:{request:async()=>({code:0,data:{url,qrcode_key:'synthetic-key'}})}});
+  const root=fs.mkdtempSync(path.join(os.tmpdir(),'core-bili-qr-'));
+  try{const manager=new AccountManager({file:path.join(root,'accounts.json'),workspaceId:()=> 'synthetic'});manager.register(adapter);const result=await manager.begin('bilibili',{method:'web-qr',acceptWebAdapter:true});assert.equal(result.pending.verificationUrl,url);assert.match(result.pending.qrDataUrl,/^data:image\/png;base64,/);assert.ok(!JSON.stringify(result).includes('synthetic-key'));await manager.dispose();}finally{fs.rmSync(root,{recursive:true,force:true});}
+ }
+ for(const url of ['http://account.bilibili.com/h5/account-h5/auth/scan-web','https://account.bilibili.com.evil.test/h5/account-h5/auth/scan-web','https://account.bilibili.com@evil.test/h5/account-h5/auth/scan-web','https://user@account.bilibili.com/h5/account-h5/auth/scan-web','https://account.bilibili.com/h5/account-h5/auth/other','https://passport.bilibili.com/h5-app/passport/arbitrary']){
+  const adapter=makeBilibiliAdapter({transport:{request:async()=>({code:0,data:{url,qrcode_key:'synthetic-key'}})}});
+  await assert.rejects(adapter.beginLogin({method:'web-qr',acceptWebAdapter:true}),/INVALID_RESPONSE/);
+ }
+ const adapter=makeBilibiliAdapter({transport:{request:async()=>({code:0,data:{url:'https://account.bilibili.com/h5/account-h5/auth/scan-web',qrcode_key:''}})}});
+ await assert.rejects(adapter.beginLogin({method:'web-qr',acceptWebAdapter:true}),/INVALID_RESPONSE/);
+});

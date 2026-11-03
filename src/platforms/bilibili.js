@@ -16,7 +16,9 @@ export function makeBilibiliAdapter({transport=createPlatformTransport({allowedO
       if(input.method!=='web-qr'||input.acceptWebAdapter!==true)fail('PERMISSION_REQUIRED');
       const d=unwrap(await transport.request(passportOrigin+'/x/passport-login/web/qrcode/generate',options));
       let u;try{u=new URL(d.url);}catch{fail('INVALID_RESPONSE');}
-      if(u.origin!==PASSPORT||!u.pathname.startsWith('/h5-app/passport/')||typeof d.qrcode_key!=='string'||d.qrcode_key.length>256)fail('INVALID_RESPONSE');
+      const trustedQr=(u.origin===PASSPORT&&u.pathname==='/h5-app/passport/login/scan')||
+        (u.origin==='https://account.bilibili.com'&&u.pathname==='/h5/account-h5/auth/scan-web');
+      if(!trustedQr||u.username||u.password||typeof d.qrcode_key!=='string'||!d.qrcode_key||d.qrcode_key.length>256)fail('INVALID_RESPONSE');
       return {private:{key:d.qrcode_key},public:{verificationUrl:u.href,expiresAt:now()+180000,intervalMs:3000}};
     },
     async pollLogin(p,options={}) {
