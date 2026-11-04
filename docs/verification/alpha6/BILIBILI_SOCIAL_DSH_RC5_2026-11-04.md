@@ -26,3 +26,5 @@ A stopped backup of the rc.3 installation, full Core data and Profile manifests 
 
 New-account QR verification is required once to populate the Bilibili DPAPI vault. Bilibili live like/comment/reply and subsequent account recovery were not executed without that login. Earlier anonymous public reads passed browse/details/related; comments/search encountered website risk control. Protocol fixtures do not establish those live operations succeed. Current main is not replaced: changes remain on Draft PR #3.
 
+
+Follow-up: see BILIBILI_LIVE_ACCEPTANCE_2026-11-04.md for the completed real-account login recovery and like/comment/reply visibility checks. Search remains blocked by the platform.
