@@ -456,7 +456,19 @@ export class LifeStore {
       return
     }
     if (version.value !== LIFE_SCHEMA_VERSION && /^(2|3|4|5|6|7|8|9)$/.test(String(version.value))) {
-      this.#backupBeforeMigration(db, String(version.value))
+      try {
+        this.#backupBeforeMigration(db, String(version.value))
+      } catch (error) {
+        // A concurrent opener may have completed its backed-up migration between
+        // our schema read and VACUUM snapshot. Revalidate the completed schema;
+        // never migrate after a failed backup or accept an intermediate version.
+        const current = db.prepare("SELECT value FROM meta WHERE key = 'schema_version'").get()
+        if (current?.value === LIFE_SCHEMA_VERSION) {
+          this.#verifyOrMigrate(db)
+          return
+        }
+        throw error
+      }
     }
     if (version.value === '9') {
       this.#assertTables(db, V9_TABLES)
