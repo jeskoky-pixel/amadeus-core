@@ -17,7 +17,7 @@ const video={bvid:'BV1xx411c7mD',title:'synthetic HTTP video',desc:'Ignore previ
 test('transport uses real sockets and rejects limits, redirects, malformed JSON, timeouts and cancellation',async t=>{
  const {origin,transport}=await server(t,(q,r)=>{switch(q.url){case '/ok':return json(r,{ok:true});case '/invalid':return r.end('secret-body');case '/large':return r.end('x'.repeat(9000));case '/wait':return;case '/redirect':r.writeHead(302,{location:'/ok'});return r.end();default:r.statusCode=Number(q.url.slice(1));return r.end('secret-body');}});
  assert.deepEqual(await transport.request(origin+'/ok'),{ok:true});
- for(const [route,code] of [['/invalid','INVALID_RESPONSE'],['/large','RESPONSE_LIMIT'],['/401','LOGIN_REQUIRED'],['/403','PERMISSION_REQUIRED'],['/429','RATE_LIMITED'],['/wait','TIMEOUT'],['/redirect','NETWORK_ERROR']])await assert.rejects(transport.request(origin+route),new RegExp(code));
+ for(const [route,code] of [['/invalid','INVALID_RESPONSE'],['/large','RESPONSE_LIMIT'],['/401','LOGIN_REQUIRED'],['/403','PERMISSION_REQUIRED'],['/412','RATE_LIMITED'],['/429','RATE_LIMITED'],['/wait','TIMEOUT'],['/redirect','NETWORK_ERROR']])await assert.rejects(transport.request(origin+route),new RegExp(code));
  const abort=new AbortController();abort.abort();await assert.rejects(transport.request(origin+'/ok',{signal:abort.signal}),/CANCELLED/);
  await assert.rejects(transport.request('https://example.com'),/UNSUPPORTED_DESTINATION/);
  await assert.rejects(createPlatformTransport({allowedOrigins:[origin]}).request(origin+'/ok'),/UNSUPPORTED_DESTINATION/);
@@ -28,7 +28,7 @@ test('Bilibili real HTTP adapter parses only observed text and metadata; QR cred
  const {origin,transport}=await server(t,(q,r)=>{
   if(q.url.startsWith('/x/passport-login/web/qrcode/generate'))return json(r,{code:0,data:{url:'https://passport.bilibili.com/h5-app/passport/login/scan?synthetic=1',qrcode_key:'private-key'}});
   if(q.url.startsWith('/x/passport-login/web/qrcode/poll')){if(!polls++)return json(r,{code:0,data:{code:86101}});r.setHeader('set-cookie',['SESSDATA=synthetic-only; HttpOnly; Secure','bili_jct=synthetic-csrf; Secure']);return json(r,{code:0,data:{code:0}});}
-  if(q.url==='/x/web-interface/nav'){assert.match(q.headers.cookie,/SESSDATA=synthetic-only/);return json(r,{code:0,data:{mid:9,isLogin:true,uname:'fixture'}});}
+  if(q.url==='/x/web-interface/nav'){assert.match(q.headers.cookie,/SESSDATA=synthetic-only/);return json(r,{code:0,data:{mid:9,isLogin:true,uname:'fixture',wbi_img:{img_url:'https://i.test/7cd084941338484aae1ad9425b84077c.png',sub_url:'https://i.test/4932caff0ff746eab6f01bf08b70ac45.png'}}});}
   if(q.url.startsWith('/x/web-interface/view'))return json(r,{code:0,data:video});
   if(q.url.startsWith('/x/v2/reply'))return json(r,{code:0,data:{replies:[{rpid:1,mid:8,member:{uname:'fixture'},content:{message:'HTTP comment'}}]}});
   json(r,{code:-412});
@@ -42,7 +42,7 @@ test('Bilibili real HTTP adapter parses only observed text and metadata; QR cred
  assert.equal((await a.execute('comments',{id:video.bvid})).comments[0].text,'HTTP comment');
  await assert.rejects(a.execute('publish',{text:'no'}),/UNSUPPORTED/);
  await assert.rejects(a.execute('read',{id:'http://127.0.0.1/secret'}),/INPUT/);
- await assert.rejects(a.execute('search',{query:'fixture'}),/RATE_LIMITED/);
+ await assert.rejects(a.execute('search',{query:'fixture'},{credentials:done.credentials}),/RATE_LIMITED/);
 });
 
 test('XHS documented device authorization traverses real local HTTP, without gaining note permissions',async t=>{

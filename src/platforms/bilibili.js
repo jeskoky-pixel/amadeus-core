@@ -1,3 +1,4 @@
+import {createHash} from 'node:crypto';
 import {createPlatformTransport} from './transport.js';
 import {socialInput} from './social-journal.js';
 const API='https://api.bilibili.com',PASSPORT='https://passport.bilibili.com';
@@ -7,7 +8,33 @@ const bvid=id=>{if(typeof id!=='string'||!/^BV[0-9A-Za-z]{10}$/.test(id))fail('I
 function unwrap(r){if(r?.code!==0)fail(r?.code===-101?'LOGIN_REQUIRED':[-352,-412,-509].includes(r?.code)?'RATE_LIMITED':r?.code===-403?'PERMISSION_REQUIRED':'INVALID_RESPONSE');if(!r.data||typeof r.data!=='object')fail('INVALID_RESPONSE');return r.data;}
 function video(v){return {id:bvid(v.bvid),type:'video',title:text(v.title,500),author:{id:String(v.owner?.mid??v.mid??''),name:text(v.owner?.name??v.author,200)},sourceUrl:`https://www.bilibili.com/video/${v.bvid}`,description:text(v.desc??v.description),durationSeconds:Number.isFinite(v.duration)?v.duration:null,observed:['metadata'],visionAnalysis:'not-performed'};}
 export function makeBilibiliAdapter({transport=createPlatformTransport({allowedOrigins:[API,PASSPORT]}),apiOrigin=API,passportOrigin=PASSPORT,now=()=>Date.now(),vault=null}={}) {
-  const observed=new Map();let epoch=0;
+  const observed=new Map(),searchStates=new Map();let epoch=0;
+  const mixinTable=[46,47,18,2,53,8,23,32,15,50,10,31,58,3,45,35,27,43,5,49,33,9,42,19,29,28,14,39,12,38,41,13,37,48,7,16,24,55,40,61,26,17,0,1,60,51,30,4,22,25,54,21,56,59,6,63,57,62,11,36,20,34,44,52];
+  async function search(input,credentials,actor,opt){
+    const page=input.page??1;if(!Number.isSafeInteger(page)||page<1||page>100)fail('INPUT');
+    const key=scope(credentials,actor);let state=searchStates.get(key);
+    if(!state){if(searchStates.size>=100)searchStates.delete(searchStates.keys().next().value);state={until:0,key:null,at:0};searchStates.set(key,state);}
+    if(now()<state.until)fail('RATE_LIMITED');
+    const generation=epoch;state.until=now()+1500;
+    const searchHeaders={...headers(credentials),'user-agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',referer:'https://search.bilibili.com/'};
+    try{
+      if(!state.key||now()-state.at>=600000){
+        const nav=await transport.request(apiOrigin+'/x/web-interface/nav',{...opt,headers:searchHeaders});
+        if(![0,-101].includes(nav.code))unwrap(nav);
+        const keys=['img_url','sub_url'].map(k=>{const value=nav.data?.wbi_img?.[k];if(typeof value!=='string')fail('INVALID_RESPONSE');const match=/\/([a-f0-9]{32})\.[a-z]+(?:\?.*)?$/i.exec(value);if(!match)fail('INVALID_RESPONSE');return match[1];});
+        const raw=keys.join('');state.key=mixinTable.map(i=>raw[i]).join('').slice(0,32);state.at=now();
+      }
+      if(generation!==epoch)fail('REVOKED');opt.signal?.throwIfAborted();
+      const params={search_type:'video',keyword:input.query,page,wts:Math.floor(now()/1000)};
+      const query=Object.keys(params).sort().map(k=>encodeURIComponent(k)+'='+encodeURIComponent(String(params[k]).replace(/[!'()*]/g,''))).join('&');
+      const signature=createHash('md5').update(query+state.key).digest('hex');
+      const d=unwrap(await transport.request(apiOrigin+'/x/web-interface/wbi/search/type?'+query+'&w_rid='+signature,{...opt,headers:searchHeaders}));
+      if(generation!==epoch)fail('REVOKED');
+      if(d.v_voucher)fail('RATE_LIMITED');
+      const rows=d.result??d.results;if(!Array.isArray(rows))fail('INVALID_RESPONSE');
+      return {operation:'search',page,items:remember(rows.filter(v=>typeof v.bvid==='string'&&/^BV[0-9A-Za-z]{10}$/.test(v.bvid)).slice(0,10).map(v=>video({...v,title:typeof v.title==='string'?v.title.replace(/<[^>]*>/g,''):v.title})),credentials,actor)};
+    }catch(error){if(/RATE_LIMITED/.test(error.message))state.until=now()+300000;throw error;}
+  }
   const scope=(credentials,identity)=>JSON.stringify([identity?.workspaceId,identity?.sessionId,credentials?.accountId]);
   function seen(credentials,identity){const key=scope(credentials,identity);if(!observed.has(key)){if(observed.size>=100)observed.delete(observed.keys().next().value);observed.set(key,new Map());}return observed.get(key);}
   function remember(items,credentials,identity){const map=seen(credentials,identity);for(const item of items){if(map.size>=200)map.delete(map.keys().next().value);const old=map.get(item.id);map.set(item.id,{at:now(),comments:old?.comments??new Map()});}return items;}
@@ -23,7 +50,7 @@ export function makeBilibiliAdapter({transport=createPlatformTransport({allowedO
     if(operation==='reply'){const parent=prior.comments.get(action.commentId);if(!parent||now()-parent.at>3600000)fail('TARGET_NOT_OBSERVED');}
     return {action,csrf,prior};
   }
-  return Object.freeze({id:'bilibili',contractVersion:2,mode:'real',version:'0.3.0',name:'Bilibili',category:'video',
+  return Object.freeze({id:'bilibili',contractVersion:2,mode:'real',version:'0.3.1',name:'Bilibili',category:'video',
     description:'Bilibili web adapter; not an Open Platform OAuth SDK',authMethods:['web-qr'],
     capabilities:['browse','search','read','comments','related','like','comment','reply'],requiresAccount:false,
     socialWrites:true,socialTargetKind:'bilibili-video',storage:vault?'windows-dpapi':'session-only',
@@ -59,9 +86,9 @@ export function makeBilibiliAdapter({transport=createPlatformTransport({allowedO
     },
     validateAccount:identity,
     async restoreLogin({accountId}){const generation=epoch,vaultFile=vault?.file();if(!vault)fail('LOGIN_REQUIRED');const saved=await vault.read();if(saved?.accountId!==accountId||typeof saved?.credentials?.cookie!=='string')fail('LOGIN_REQUIRED');const verified=await identity(saved.credentials,{});if(generation!==epoch||vaultFile!==vault?.file())fail('REVOKED');if(verified.identity.accountId!==accountId)fail('IDENTITY_MISMATCH');return {...verified,credentials:saved.credentials,expiresAt:now()+7200000,scopes:['web-session']};},
-    async logout(){epoch++;observed.clear();vault?.clear();},
-    async clearSession(){epoch++;observed.clear();vault?.clear();},
-    async dispose(){epoch++;observed.clear();},
+    async logout(){epoch++;observed.clear();searchStates.clear();vault?.clear();},
+    async clearSession(){epoch++;observed.clear();searchStates.clear();vault?.clear();},
+    async dispose(){epoch++;observed.clear();searchStates.clear();},
     // Local disconnect is supported. Remote web-session revocation is not claimed.
     async execute(operation,input={}, {signal,credentials,identity:actor,assertAuthorized}={}) {
       if(!input||typeof input!=='object')fail('INPUT');
@@ -84,8 +111,7 @@ export function makeBilibiliAdapter({transport=createPlatformTransport({allowedO
       if(operation==='related'){const d=await get('/x/web-interface/archive/related?bvid='+bvid(input.id),credentials,opt);if(!Array.isArray(d))fail('INVALID_RESPONSE');return {operation,items:remember(d.slice(0,10).map(video),credentials,actor)};}
       if(operation==='search'){
         if(typeof input.query!=='string'||!input.query.trim()||input.query.length>512)fail('INPUT');
-        const d=await get('/x/web-interface/search/type?search_type=video&keyword='+encodeURIComponent(input.query),credentials,opt);
-        if(!Array.isArray(d.result))fail('INVALID_RESPONSE');return {operation,items:remember(d.result.slice(0,10).map(video),credentials,actor)};
+        return search(input,credentials,actor,opt);
       }
       if(operation==='comments'){
         const v=await get('/x/web-interface/view?bvid='+bvid(input.id),credentials,opt);
