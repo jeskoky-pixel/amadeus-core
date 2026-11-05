@@ -109,6 +109,8 @@ test('detail text, raw evidence and cross-source denial share the real ACL bound
   const event = await f.journal.record({ platform: 'xiaohongshu-browser', activityId: 'a', sessionId: 's', operation: 'read', step: 0, observation });
   const read = f.journal.read(event.eventId, 's');
   assert.match(read.memory.content, /灯塔修缮/);
+  assert.deepEqual(read, JSON.parse(JSON.stringify(read)), 'registered tool output must be lossless JSON on the current Host');
+  assert.equal(Object.hasOwn(read.memory, 'embedding'), false, 'storage embeddings are not experience facts');
   assert.match(read.memory.content, /使用青石修复塔基/);
   assert.match(read.memory.content, /潮水退去后施工/);
   assert.equal(read.rawEvidenceStatus, 'ok');

@@ -12,6 +12,7 @@ The [source capability inventory](CAPABILITY_INVENTORY_2026-11-06.md) enumerates
 - Protected rows were correctly retained while deletion callers falsely reported success. Service/model/HTTP now reflect actual deletion; missing/invisible rows do not reveal existence, protected model reads are not called deleted, ordinary Owner deletion returns conflict, and explicit confirmed Core deletion remains available. Store protection/schema/ACL are unchanged.
 - Life uses supported bounded history pages and exact contiguous failed-Turn evidence. Only a proven action-free failed/cancelled wake closes as failed. Partial/conflicting/unknown action evidence stays unresolved. Old wakes are not replayed or marked executed.
 - Owner Persona assembly diagnostics support current Host Agent lookup and session.id, retain membership checks and expose section visibility only. No Persona text is invented or rewritten.
+- Actual registered experience reads exposed a current-Host lossless-JSON error from returning raw storage rows with undefined optional fields. The read now returns an explicit factual Memory projection without storage embeddings. Raw receipt authority and ACL/delivery order remain unchanged; real-SQLite regression checks lossless JSON.
 - Platform account/experience views localize state/time, disclose technical details on expansion and honestly report missing verification timestamps. Operations and grants are preserved.
 
 ## Native regression

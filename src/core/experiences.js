@@ -154,7 +154,12 @@ export class Experiences {
     m.unifiedRuntime.authorize.delivery(session,[row],'tool');
     // Raw evidence is only read after the same Memory ACL + delivery gate.
     const evidence=this.readEvidence(eventId,event);
-    return {event:structuredClone(event),memory:row,
+    // Store rows contain undefined optional fields and may contain binary
+    // embeddings. The current Host requires lossless JSON tool values; expose
+    // readable Memory facts rather than the persistence object.
+    const memory=Object.fromEntries(['id','type','title','content','tags','importance','source','created_at','updated_at','archived','forgotten','occurred_at','evidence']
+      .filter(key=>row[key]!==undefined).map(key=>[key,row[key]]));
+    return {event:structuredClone(event),memory,
       rawEvidence:evidence.status==='ok'?evidence.observation:null,
       rawEvidenceStatus:evidence.status};
   }
