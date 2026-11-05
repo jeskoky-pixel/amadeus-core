@@ -957,8 +957,8 @@ export class PersonaService {
       return { status: 'unavailable', reason: 'host_assembly_unavailable' };
     }
     let agent;
-    try { agent = this.getAgent(id); } catch { agent = undefined; }
-    if (!agent || typeof agent !== 'object' || agent.id !== id) {
+    try { agent = await this.getAgent(id); } catch { agent = undefined; }
+    if (!agent || typeof agent !== 'object' || (agent.session?.id ?? agent.id) !== id) {
       return { status: 'unavailable', reason: 'agent_not_live' };
     }
     const expected = this.resolveForAssembly(agent);

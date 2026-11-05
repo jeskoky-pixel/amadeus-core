@@ -2921,6 +2921,12 @@ export function createService({ store, mirror, config, onWrite, logger, document
     const sync = afterSync("write");
     notifyWrite();
     scheduleEmbed(updated);
+    // A real content/title correction is a normal write for the entity face:
+    // use the same extraction queue as saveWithDedupe. Metadata-only patches
+    // (importance/tags/scope) and unchanged bodies must not spend an LLM pass.
+    if (old && updated && (old.content !== updated.content || old.title !== updated.title)) {
+      scheduleEntityExtraction(updated);
+    }
     // Audit peer B: when the mirror sync failed, the store write landed but
     // the mirror did not converge — return an explicit degraded receipt rather
     // than a plain success. Non-enumerable so existing deepEqual assertions on
@@ -3210,6 +3216,13 @@ export function createService({ store, mirror, config, onWrite, logger, document
       const sync = afterSync("write");
       notifyWrite();
       scheduleEmbed(updated);
+      // A successful CAS that changes the semantic text is a normal content
+      // write: run the same extraction path as saveWithDedupe so the entity/
+      // attribute face reflects the corrected body. CAS misses returned above,
+      // and importance/tag-only patches must not trigger a redundant LLM pass.
+      if (old && updated && (old.content !== updated.content || old.title !== updated.title)) {
+        scheduleEntityExtraction(updated);
+      }
       // Audit peer B: mirror sync failure on a CAS write must surface too.
       if (!sync?.success && !sync?.deferred) {
         Object.defineProperty(updated, "_mirror", {

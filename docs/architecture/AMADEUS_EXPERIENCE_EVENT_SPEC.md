@@ -1,3 +1,7 @@
+> 2026-11-06 当前实现补充：下文的“只支持模拟”和 Memory 内嵌完整 JSON 是早期契约。当前真实 Registry receipt 与模拟记录分别标注。新经历的 Memory 正文是有界可读事实，保留来源平台、操作、时间、事件引用及未观察内容的边界；不含账号标识、完整返回体或令牌。完整已验证真实 receipt 由 Host 原子写入 Core 数据根 `experience-evidence/<eventId>.json`，索引记录 SHA-256。`read` 先通过原 Memory ACL 与 delivery，再校验身份字段和内容哈希，返回加法字段 `rawEvidence` / `rawEvidenceStatus`；缺失为 missing、损坏为 invalid，不伪造证据。Owner 列表不携带 raw。
+>
+> Memory 质量规则保持不变：大型技术 JSON 不再作为记忆正文，独立事实可以检索，重复事实仍可能按既有规则归档。旧 Memory、旧索引和已归档记录不回填、不取消归档；旧事件缺少独立 raw 时仍可读取其获授权的旧 Memory，raw 状态明确为 missing。现有事件键、数据代、10000 条上限和 64 KiB 原始 receipt 上限保持不变。模拟 fixture 不写成真实 raw。
+
 # Amadeus 体验事件规格
 
 ## 1. 定位
