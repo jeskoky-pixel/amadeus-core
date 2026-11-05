@@ -868,6 +868,16 @@ window.__ModuleLoader__.load({
         // 否则「暂无实体」会把打错一个字误导成「你还没开抽取」。
         "memory.entities.noMatch": "没有匹配的实体，换个词试试",
         "memory.entities.none": "暂无实体：开启实体抽取后，记忆里的人物 / 项目 / 概念会自动沉淀到这里",
+        "memory.entities.restart": "实体抽取已开启，但当前运行时尚未装载；重载插件后开始抽取",
+        "memory.entities.restartOff": "实体抽取已关闭，但当前运行时仍在抽取；重载插件后停止",
+        "memory.entities.pending": "实体抽取正在处理中…",
+        "memory.entities.emptyEnabled": "实体抽取已开启，暂无实体；新写入的记忆会自动沉淀人物 / 项目 / 概念",
+        "memory.entities.failed": "最近一次实体抽取失败；新的记忆仍会继续尝试抽取",
+        "memory.entities.failedParse": "最近一次实体抽取失败：模型返回的内容无法解析；新的记忆仍会继续尝试抽取",
+        "memory.entities.forbidden": "没有权限读取实体目录；请确认当前身份或 Scene 授权",
+        "memory.entities.network": "网络错误，无法加载实体目录",
+        "memory.entities.httpError": "加载实体目录失败（服务返回错误）",
+        "memory.entities.refresh": "刷新",
         "memory.entities.attrs": "属性",
         "memory.entities.relations": "关系",
         "memory.entities.mentions": "{n} 次提及",
@@ -2082,6 +2092,16 @@ window.__ModuleLoader__.load({
         "memory.entities.pick": "Select an entity to see its attributes and relations",
         "memory.entities.noMatch": "No entities match that search — try another word",
         "memory.entities.none": "No entities yet — turn on entity extraction and people / projects / concepts will accumulate here",
+        "memory.entities.restart": "Entity extraction is on, but this runtime has not loaded it yet; reload the plugin to start extracting",
+        "memory.entities.restartOff": "Entity extraction is off, but this runtime is still extracting; reload the plugin to stop it",
+        "memory.entities.pending": "Entity extraction is running…",
+        "memory.entities.emptyEnabled": "Entity extraction is on and there are no entities yet; new memories will add people / projects / concepts",
+        "memory.entities.failed": "The last entity extraction failed; new memories will still be attempted",
+        "memory.entities.failedParse": "The last entity extraction failed: the model response could not be parsed; new memories will still be attempted",
+        "memory.entities.forbidden": "You do not have permission to read the entity directory; check the current identity or Scene grants",
+        "memory.entities.network": "Network error — the entity directory could not be loaded",
+        "memory.entities.httpError": "Could not load the entity directory (the service returned an error)",
+        "memory.entities.refresh": "Refresh",
         "memory.entities.attrs": "Attributes",
         "memory.entities.relations": "Relations",
         "memory.entities.mentions": "{n} mentions",
@@ -3580,6 +3600,7 @@ window.__ModuleLoader__.load({
         catch(e){setError(String(e.message));} finally{setBusy(false);}
       };
       const selected = state?.sessions.find(s=>s.id===source);
+      const workspaceLabel = state?.workspace_title || state?.workspace_id || "尚未选择";
       const nodes = preview?.nodes || [];
       const positions = new Map(nodes.map((n,i)=>[n.id,{x:260+210*Math.cos(i*2*Math.PI/Math.max(1,nodes.length)),y:150+110*Math.sin(i*2*Math.PI/Math.max(1,nodes.length))}]));
       return h("section", {className:"mneme-set-card",style:{marginBottom:12},"aria-label":graph?"Session 图谱预览":"统一 Session 长期记忆授权"},
@@ -3587,7 +3608,7 @@ window.__ModuleLoader__.load({
         error && h("div",{role:"alert",style:{color:"var(--mneme-danger)"}},error),
         notice && h("div",{role:"status"},notice),
         !state ? h("p",null,"正在读取可信工作区与会话…") : h("div",null,
-          h("p",{className:"mneme-set-hint"},`工作区：${state.workspace_id || "尚未选择"} · ${state.sessions.length} 个会话 · ${state.enabled?"统一 ACL 已挂载":"未挂载（开启后请重启插件）"}`),
+          h("p",{className:"mneme-set-hint",title:state.workspace_id || undefined},`工作区：${workspaceLabel} · ${state.sessions.length} 个会话 · ${state.enabled?"统一 ACL 已挂载":"未挂载（开启后请重启插件）"}`),
           !graph && h("label",null,h("input",{type:"checkbox",checked:state.configured,onChange:async e=>{
             try{await adminJson("/features",{method:"POST",body:JSON.stringify({unifiedSessionAclEnabled:e.target.checked})}); await load();setNotice("已保存开关，请重启插件后检查生效状态。关闭前请保留实验数据库快照。");}catch(err){setError(String(err.message));}
           }}),"启用统一 Session ACL（实验，默认关闭）"),
@@ -3622,6 +3643,33 @@ window.__ModuleLoader__.load({
             nodes.map(node=>h("details",{key:node.id},h("summary",null,node.name),node.attrs.map(attr=>h("p",{key:attr.id},`${attr.attr_key}：${attr.attr_value} · ${attr.memory_id}`)))))));
     }
 
+    // Single decision for the entity directory's empty/error face. Kept pure so
+    // the built bundle can be exercised without a browser (see __test export).
+    function entityDirectoryState({ count = 0, loading = false, query = "", error = null, status = null } = {}) {
+      if (error) {
+        if (error.kind === "http" && (error.status === 401 || error.status === 403)) return "forbidden";
+        if (error.kind === "network") return "network";
+        return "error";
+      }
+      if (loading) return "loading";
+      if (Number(count) > 0) return null;
+      if (String(query ?? "").trim()) return "noMatch";
+      if (!status || typeof status !== "object") return "none";
+      if (status.enabled !== true) {
+        // Saved off. If the boot-time runtime (or an installed hook) is still
+        // active, say so instead of pretending extraction already stopped.
+        if (status.runtimeEnabled === true || status.installed === true) return "restartOff";
+        return "disabled";
+      }
+      if (status.runtimeEnabled === false) return "restart";
+      if (status.installed !== true) return "restart";
+      if (Number(status.pending) > 0) return "pending";
+      if (status.last && status.last.ok === false) {
+        return status.last.code === "parse_failed" ? "failedParse" : "failed";
+      }
+      return "empty";
+    }
+
     function EntityPanel({ t, focusEntity, onJumpMemory }) {
       const [aclGraphView,setAclGraphView]=useState("");
       const [entities, setEntities] = useState(null); // null = still loading
@@ -3629,6 +3677,8 @@ window.__ModuleLoader__.load({
       const [entityTotal, setEntityTotal] = useState(0);
       const [entityHasMore, setEntityHasMore] = useState(false);
       const [entitiesLoading, setEntitiesLoading] = useState(false);
+      const [entityStatus, setEntityStatus] = useState(null);
+      const [entitiesError, setEntitiesError] = useState(null);
       const [entityId, setEntityId] = useState(focusEntity || "");
       const [depth, setDepth] = useState(1);
       const [data, setData] = useState(null);
@@ -3650,12 +3700,36 @@ window.__ModuleLoader__.load({
 
       const loadDirectory = useCallback(async ({ offset = 0, append = false, query = "" } = {}) => {
         setEntitiesLoading(true);
+        let res;
         try {
           const params = new URLSearchParams({ limit: "500", offset: String(offset) });
           if (query) params.set("q", query);
-          const res = await apiFetch(`/api/dsh-mneme/entities?${params.toString()}`);
-          const json = res.ok ? await res.json() : { entities: [], total: 0 };
+          res = await apiFetch(`/api/dsh-mneme/entities?${params.toString()}`);
+        } catch {
+          setEntitiesError({ kind: "network" });
+          if (!append) { setEntities([]); setEntityTotal(0); setEntityHasMore(false); }
+          setEntitiesLoading(false);
+          return;
+        }
+        if (!res.ok) {
+          setEntitiesError({ kind: "http", status: Number(res.status) || 0 });
+          if (!append) { setEntities([]); setEntityTotal(0); setEntityHasMore(false); }
+          setEntitiesLoading(false);
+          return;
+        }
+        let json;
+        try {
+          json = await res.json();
+        } catch {
+          setEntitiesError({ kind: "error" });
+          if (!append) { setEntities([]); setEntityTotal(0); setEntityHasMore(false); }
+          setEntitiesLoading(false);
+          return;
+        }
+        try {
           const items = Array.isArray(json.entities) ? json.entities : [];
+          setEntitiesError(null);
+          setEntityStatus(json && typeof json.status === "object" ? json.status : null);
           setEntities((old) => {
             if (!append) return items;
             const merged = [...(old || [])];
@@ -3666,8 +3740,8 @@ window.__ModuleLoader__.load({
           setEntityTotal(Number.isFinite(json.total) ? json.total : items.length);
           setEntityHasMore(json.has_more === true);
         } catch {
-          if (!append) setEntities([]);
-          setEntityHasMore(false);
+          setEntitiesError({ kind: "error" });
+          if (!append) { setEntities([]); setEntityTotal(0); setEntityHasMore(false); }
         } finally {
           setEntitiesLoading(false);
         }
@@ -3995,6 +4069,18 @@ window.__ModuleLoader__.load({
       const rootEdges = (data?.edges || []).filter((e) => e.from === data?.root?.id || e.to === data?.root?.id);
       const graphStatus = status === "ready" && data && data.nodes.length <= 1 ? "empty" : status;
 
+      const emptyKind = entityDirectoryState({
+        count: visibleEntities.length,
+        loading: entities === null,
+        query: railQuery,
+        error: entitiesError,
+        status: entityStatus
+      });
+      const refreshRail = () => h("button", {
+        className: "mneme-footbtn",
+        onClick: () => loadDirectory({ offset: 0, query: railQuery.trim() })
+      }, t("memory.entities.refresh"));
+
       const rail = h("div", { className: "mneme-entrail" },
         // 头部固定段：表头（本页名「实体」——原误用全局页签名「记忆库」，而
         // memory.view.label 仍被顶部 nav aria-label 使用，字典不动只换这里）
@@ -4011,9 +4097,25 @@ window.__ModuleLoader__.load({
             t("memory.entities.count").replace("{n}", String(entityTotal)))
         ),
         h("div", { className: "mneme-entrailbody" },
-          entities === null && h("div", { className: "mneme-xempty" }, "…"),
-          entities !== null && entities.length === 0 && railQuery.trim() && h("div", { className: "mneme-xempty" }, t("memory.entities.noMatch")),
-          entities !== null && entities.length === 0 && !railQuery.trim() && h("div", { className: "mneme-xempty" }, t("memory.entities.none")),
+          emptyKind === "loading" && h("div", { className: "mneme-xempty" }, "…"),
+          emptyKind === "noMatch" && h("div", { className: "mneme-xempty" }, t("memory.entities.noMatch")),
+          emptyKind === "none" && h("div", { className: "mneme-xempty" }, t("memory.entities.none")),
+          emptyKind === "disabled" && h("div", { className: "mneme-xempty" }, t("memory.entities.none")),
+          emptyKind === "restart" && h("div", { className: "mneme-xempty" }, t("memory.entities.restart")),
+          emptyKind === "restartOff" && h("div", { className: "mneme-xempty" }, t("memory.entities.restartOff")),
+          emptyKind === "pending" && h("div", { className: "mneme-xempty" },
+            t("memory.entities.pending"),
+            h("div", { style: { marginTop: 8 } }, refreshRail())),
+          emptyKind === "failed" && h("div", { className: "mneme-xempty" },
+            t("memory.entities.failed"),
+            h("div", { style: { marginTop: 8 } }, refreshRail())),
+          emptyKind === "failedParse" && h("div", { className: "mneme-xempty" },
+            t("memory.entities.failedParse"),
+            h("div", { style: { marginTop: 8 } }, refreshRail())),
+          emptyKind === "empty" && h("div", { className: "mneme-xempty" }, t("memory.entities.emptyEnabled")),
+          emptyKind === "forbidden" && h("div", { className: "mneme-xempty" }, t("memory.entities.forbidden")),
+          emptyKind === "network" && h("div", { className: "mneme-xempty" }, t("memory.entities.network")),
+          emptyKind === "error" && h("div", { className: "mneme-xempty" }, t("memory.entities.httpError")),
           groups.map((g) => h("div", { key: g.key },
             h("div", { className: "mneme-enttype" },
               h("span", { className: "mneme-xdot", style: { color: typeColor(g.key === "other" ? null : g.key) }, "aria-hidden": "true" }),
@@ -13243,6 +13345,7 @@ window.__ModuleLoader__.load({
     exports.inject = inject;
     if (typeof globalThis !== "undefined" && globalThis.__DSH_MNEME_TEST__ === true) {
       exports.__test = {
+        entityDirectoryState,
         configFormTransition, workspaceCardModel, workspaceSafeReason, workspaceList, AmadeusWorkspaceCard,
         AmadeusRecentActivityCard, recentActivityHasState, recentActivityConfig, recentActivityStats,
         recentActivitySessions, recentActivitySummary, recentActivityPendingRestart,

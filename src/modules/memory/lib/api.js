@@ -254,6 +254,18 @@ export function createApi(ctx, service, settings, commands, embedder, semantic =
     return true;
   };
 
+  // The panel's saved switch can already be true while the boot-time extractor
+  // hook is still absent (restart pending). Report the saved switch separately
+  // from service-owned installed/pending/last state; never expose the flag list
+  // or any provider/memory content.
+  const entityExtractionEnabled = () => {
+    try {
+      const saved = settings?.getFeatureFlags?.()?.entityExtractionEnabled;
+      if (typeof saved === "boolean") return saved;
+    } catch { /* fall back to boot-time config */ }
+    return config?.entityExtractionEnabled === true;
+  };
+
   // New identity/provenance/preference routes are not allowed to inherit the
   // legacy fail-open behavior: an absent server token is a setup error, not an
   // invitation to serve private aliases/external IDs/provenance.
@@ -1581,10 +1593,22 @@ export function createApi(ctx, service, settings, commands, embedder, semantic =
           canonical_memory_id: group.canonical_memory_id ?? null
         }));
         const paged = url.searchParams.has("limit") || url.searchParams.has("offset") || url.searchParams.has("q");
-        // Preserve the legacy no-parameter response exactly; pagination metadata
-        // is added only when the caller asks for a page/query.
+        const extraction = typeof service.getEntityExtractionStatus === "function"
+          ? service.getEntityExtractionStatus()
+          : { enabled: config?.entityExtractionEnabled === true, installed: false, pending: 0, last: null };
+        // Safe metadata only: the saved switch (`enabled`), the boot-time
+        // runtime intent (`runtimeEnabled`), whether the hook is actually
+        // installed, queued/in-flight count and the last extraction outcome
+        // code/time. No prompt, provider message, memory body or key.
+        const status = {
+          ...extraction,
+          enabled: entityExtractionEnabled(),
+          runtimeEnabled: extraction.enabled === true
+        };
+        // Preserve the legacy entity fields and add one additive `status` block;
+        // pagination metadata is added only when the caller asks for a page/query.
         if (!paged) {
-          sendJson(res, 200, { entities, total: page.total });
+          sendJson(res, 200, { entities, total: page.total, status });
         } else {
           // `total` is the true canonical count (or filtered count), not the page
           // length; offset/has_more make the whole graph reachable in bounded pages.
@@ -1594,7 +1618,8 @@ export function createApi(ctx, service, settings, commands, embedder, semantic =
             offset: page.offset,
             limit: page.limit,
             has_more: page.has_more,
-            query: page.query ?? ""
+            query: page.query ?? "",
+            status
           });
         }
       } catch {

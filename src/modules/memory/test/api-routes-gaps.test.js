@@ -125,7 +125,11 @@ test("entities directory is read-only and returns empty list", async () => {
   const res = new FakeRes();
   await route.handler(req("/api/dsh-mneme/entities"), res);
   assert.equal(res.statusCode, 200);
-  assert.deepEqual(JSON.parse(res.body), { entities: [], total: 0 });
+  assert.deepEqual(JSON.parse(res.body), {
+    entities: [],
+    total: 0,
+    status: { enabled: false, runtimeEnabled: false, installed: false, pending: 0, last: null }
+  });
 });
 
 test("entities lists seeded entities without auth", async () => {
