@@ -703,7 +703,7 @@ test("graph jump lands on the selected memory in the browser", () => {
     "the edge source button must jump to the origin memory by id"
   );
   assert.ok(
-    /const jumpToMemory = \(target\) => \{/.test(clientSource),
+    /const jumpToMemory = (?:async )?\(target\) => \{/.test(clientSource),
     "jumpToMemory must reset filters and select the target"
   );
 });

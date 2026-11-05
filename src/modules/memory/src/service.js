@@ -3179,11 +3179,17 @@ export function createService({ store, mirror, config, onWrite, logger, document
     },
     remove: (id) => {
       const row = store.getById(id);
-      if (!row) return;
+      if (!row) return false;
       assertJobScene(row);
-      store.remove(id);
+      // store.remove has an intentional mixed contract: `false` means the
+      // protected row was refused, while successful deletion returns undefined.
+      // Never treat undefined as failure (that would report a real delete as a
+      // miss), and never notify/mirror a refused delete.
+      const removed = store.remove(id);
+      if (removed === false) return false;
       afterSync("write");
       notifyWrite();
+      return true;
     },
     update: updateMemory,
     // v0.8.1 底座：scope 归属修正审计（单条记忆，新→旧）。

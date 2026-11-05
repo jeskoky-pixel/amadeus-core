@@ -857,11 +857,15 @@ export function createApi(ctx, service, settings, commands, embedder, semantic =
             sendJson(res, 400, { error: "missing-id" });
             return;
           }
-          if (!service.getById(id)) {
+          const existing = service.getById(id);
+          if (!existing) {
             sendJson(res, 404, { error: "not-found" });
             return;
           }
-          service.remove(id);
+          if (service.remove(id) !== true) {
+            sendJson(res, 409, { error: existing.protected === true ? "protected-memory" : "not-deleted" });
+            return;
+          }
           sendJson(res, 200, { ok: true });
         });
       } catch {

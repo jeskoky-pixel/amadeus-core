@@ -930,6 +930,10 @@ window.__ModuleLoader__.load({
         "memory.graph.related": "关联记忆",
         "memory.graph.relation": "关系",
         "memory.graph.sourceMemory": "查看来源记忆",
+        "memory.graph.sourceLoading": "正在读取来源记忆…",
+        "memory.graph.sourceDenied": "无权读取这条来源记忆。",
+        "memory.graph.sourceMissing": "来源记忆已不存在。",
+        "memory.graph.sourceError": "来源记忆读取失败，请稍后重试。",
         "memory.graph.hint": "拖拽节点调整布局 · 空白处拖动平移 · 滚轮缩放",
         "memory.graph.resetView": "重置视图",
         "memory.graph.summary": "实体关系图：{entity} 及其 {nodes} 个节点、{edges} 条关系",
@@ -2154,6 +2158,10 @@ window.__ModuleLoader__.load({
         "memory.graph.related": "Related memories",
         "memory.graph.relation": "Relation",
         "memory.graph.sourceMemory": "View source memory",
+        "memory.graph.sourceLoading": "Loading source memory…",
+        "memory.graph.sourceDenied": "You do not have access to this source memory.",
+        "memory.graph.sourceMissing": "This source memory no longer exists.",
+        "memory.graph.sourceError": "Could not load source memory. Try again later.",
         "memory.graph.hint": "Drag nodes to rearrange · drag the background to pan · scroll to zoom",
         "memory.graph.resetView": "Reset view",
         "memory.graph.summary": "Entity graph: {entity} with {nodes} nodes and {edges} edges",
@@ -10391,6 +10399,9 @@ window.__ModuleLoader__.load({
       const [deleteError, setDeleteError] = useState(false);
       const [toastMsg, setToastMsg] = useState(""); // 瞬时操作提示（删除/归档），挂在外层不被抽屉卸载吞掉
       const [graphFocus, setGraphFocus] = useState("");
+      const [sourceNotice, setSourceNotice] = useState(null);
+      const sourceRequest = useRef(0);
+      useEffect(() => () => { sourceRequest.current++; }, []);
       // 交互式面板新增：浏览模式（卡片/时间线，本地记住）、时间筛选、
       // 冲突冻结指示、更多操作菜单与导入弹层。
       const [viewMode, setViewMode] = useState(() => {
@@ -10687,14 +10698,31 @@ window.__ModuleLoader__.load({
       // the target row is visible, selected and scrolled into view. A target
       // beyond the loaded pages renders as a single-row result set instead
       // of pulling page after page to find it.
-      const jumpToMemory = (target) => {
+      const jumpToMemory = async (target) => {
         if (!target?.id) return;
+        const request = ++sourceRequest.current;
         setView("memory");
         setType("all");
         setQuery("");
-        setRemoteItems(items.some((m) => m.id === target.id) ? null : [target]);
+        setSelectedId(null);
+        setSourceNotice({ key: "memory.graph.sourceLoading", error: false });
         setExpandedMonths(null);
-        setSelectedId(target.id);
+        try {
+          // A graph edge carries only an ID. The source can be archived or
+          // outside loaded pages; never render that partial object as a row.
+          // This is the existing Owner-authenticated read, not a model ACL bypass.
+          const response = await adminFetch(`/memory?id=${encodeURIComponent(target.id)}`);
+          if (!response.ok) throw { status: response.status };
+          const data = await response.json(), row = data?.data;
+          if (row?.id !== target.id || typeof row.title !== "string" || typeof row.content !== "string") throw new Error("invalid source memory");
+          if (sourceRequest.current !== request) return;
+          setRemoteItems([row]);
+          setSelectedId(row.id);
+          setSourceNotice(null);
+        } catch (error) {
+          if (sourceRequest.current !== request) return;
+          setSourceNotice({ key: error?.status === 403 ? "memory.graph.sourceDenied" : error?.status === 404 ? "memory.graph.sourceMissing" : "memory.graph.sourceError", error: true });
+        }
       };
 
       const openGraphFor = (name) => {
@@ -10721,6 +10749,7 @@ window.__ModuleLoader__.load({
       ];
 
       return h("div", { className: "mneme-x" },
+        sourceNotice && h("p", { role: sourceNotice.error ? "alert" : "status" }, t(sourceNotice.key)),
         h("div", { className: "mneme-xbar" },
           h("nav", { className: "mneme-vtabs", "aria-label": t("memory.view.label") },
             subviews.map((s) =>

@@ -1662,7 +1662,13 @@ async function handle(req, res, deps) {
     if (body.confirm !== "DELETE") return send(res, 400, { ok: false, error: "confirm must be DELETE" });
     const existing = service.getById(id);
     if (!existing) return send(res, 404, { ok: false, error: "memory not found" });
-    service.remove(id);
+    const removed = service.remove(id);
+    if (removed !== true) {
+      return send(res, 409, {
+        ok: false,
+        error: existing.protected === true ? "memory is protected" : "memory was not deleted"
+      });
+    }
     return send(res, 200, { ok: true, data: { deleted: id } });
   }
   if (path === "/recent/config") {
@@ -1818,7 +1824,10 @@ async function handle(req, res, deps) {
     } else if (action === "delete") {
       if (body.confirm !== "DELETE") return send(res, 400, { ok: false, error: "confirm must be DELETE" });
       deps.store.setProtected(id, false, { by: "settings-page" });
-      service.remove(id);
+      const removed = service.remove(id);
+      if (removed !== true) {
+        return send(res, 409, { ok: false, error: "memory was not deleted" });
+      }
       return send(res, 200, { ok: true, data: { deleted: id } });
     } else {
       return send(res, 400, { ok: false, error: "action must be protect, unprotect, note or delete" });
