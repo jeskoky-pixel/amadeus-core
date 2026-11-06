@@ -62,3 +62,10 @@ Further real-run regressions in the same cycle:
 - Graph jumps previously rendered an ID-only placeholder for an archived source or a source outside loaded pages. The native client now obtains the full record through the existing same-origin Owner read, with loading/denied/missing/error states. Model ACL is separate and unchanged. Functional regressions exercise an unloaded archived source and refused reads.
 - Platform account/experience presentation localizes state/time and puts technical IDs behind disclosure. Missing verification time is unknown; expiry/current time is not a verification timestamp. Account operations, grants and scheduling are unchanged.
 - An actual registered experience read failed the current Host's lossless-JSON validator because it returned the store row, including undefined optional fields. Experience reads now project factual Memory fields and exclude storage embeddings. The complete raw receipt remains separately available only after the original ACL/delivery check. A real-SQLite regression requires round-trip-equal JSON, not merely successful JSON.stringify rendering.
+# 2026-11-07 Core 最终整合补充
+
+- 保留 Core 已有的 `src/modules/life` 作为唯一权威 Life 运行时，没有把独立 Life 仓库整体覆盖进来。
+- `src/core/life-summary.js` 只读组合 Life admin、State workspace overview 和 Experience owner list，供 Core 设置页显示当前生活概况。
+- `CoreRuntime.overview()` 暴露 `lifeSummary`；客户端只渲染派生字段，不创建调度、记忆或平台消息。
+- 没有修改 Mneme schema、Memory/Experience ACL、用户数据、QQ 仓库或平台凭据。
+- 新增隔离测试 `tests/life-summary.test.js`；构建输出继续使用单一 Core loader。

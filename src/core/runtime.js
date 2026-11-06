@@ -24,6 +24,7 @@ import { importData, rollbackData } from './import-data.js';
 import { finish } from './model-exploration.js';
 import { McpManager } from '../mcp/manager.js';
 import {makeBilibiliMock,makeXiaohongshuMock} from '../platforms/mock-platforms.js';
+import { buildLifeSummary } from './life-summary.js';
 
 const definitions = { memory, life, state, persona };
 const fields = { life: lifeFields, state: stateFields };
@@ -255,6 +256,7 @@ export class CoreRuntime {
     });
   }
   overview() {
+    const lifeSummary = buildLifeSummary(this);
     return { version: '0.2.0-alpha.6', status: this.status, problem: this.problem,
       workspaceId: this.store.state.workspaceId, revision: this.store.state.revision,
       runningRevision: this.runningRevision, pendingRestart: this.store.state.revision !== this.runningRevision,
@@ -262,6 +264,7 @@ export class CoreRuntime {
       workspaces: (host(this.ctx, 'workspaceRegistry')?.list?.() ?? []).map(w => ({ id: w.id, title: w.title })),
       platforms:this.platforms.list().filter(p=>!p.simulated),
       simulations:this.platforms.list().filter(p=>p.simulated),activity:this.activity.summary(),experiences:this.experiences.ownerList(),
+      lifeSummary,
       explorationEnabled:this.store.state.explorationEnabled===true,
       activityBudgetMs:this.store.state.activityBudgetMs??120000,
       mcp:this.mcp.overview(),
