@@ -6,9 +6,9 @@
 |---:|---|---|---|
 | 1 | 持续生活概况 | 本轮实现 | `lifeSummary` 分页读取 Life、State、Experience；设置页显示来源、错误和当前状态 |
 | 2 | 具体兴趣和问题演化 | 部分完成 | State 兴趣可回读，Life 意图可回读；真实经历推动兴趣的自然闭环尚缺现场证据 |
-| 3 | 机会筛选与自适应节律 | 部分完成 | Life 意图、预算、Activity 机制已存在；机会质量和节律长期效果未完成自然运行验收 |
+| 3 | 机会筛选与自适应节律 | 部分完成 | Life 意图、预算、Activity 机制已存在；Core 现在可显式把 Activity Session 纳入既有 Host 唤醒 allowlist，但机会质量和节律长期效果未完成自然运行验收 |
 | 4 | 跨天兴趣项目和未完事项 | 部分完成 | active intent/reviewAt 和持久账本存在；跨天真实项目连续性未完成现场验收 |
-| 5 | 主动交流理由、时机与硬权限 | 部分完成 | 外部消息 Session 绑定和 WakeHost 授权边界存在；主动外发真实 QQ 发送边界仍需实测 |
+| 5 | 主动交流理由、时机与硬权限 | 部分完成 | WakeHost、意图来源、外发提示 opt-in 和 QQ Scene Guard 的硬边界存在；Core 新增显式唤醒绑定入口但默认不授予外发提示，主动外发真实 QQ 边界仍需实测 |
 | 6 | 注意力、打断与活动接续 | 已满足/部分 | Core 已有用户打断、暂停、恢复和 unknown 语义；本轮未重跑真实长活动打断 |
 | 7 | 经历、知识、偏好、意图表达分工 | 已满足 | Experience、Memory、State、Life 仍由各自既有接口负责；本轮未复制记忆账本 |
 | 8 | 来源、推断和更正边界 | 已满足/部分 | Experience evidence/ACL 和 raw evidence 保护保留；真实平台内容更正仍需现场样本 |
@@ -29,3 +29,6 @@
 - 区分 running、pending、paused、stopping/unknown；改用 `canRestNow` 和 `canConsiderContactNow`。
 - 最近经历只显示 `stored`/`completed`，pending 经历单独计数。
 - 读取失败进入 `errors` 和来源状态；Owner 概况不进入 `amadeusCore.getHealth()` 模型侧服务。
+- `lifeDelivery` 只读摘要进入 Core 状态页，保留状态、绑定、计时器、预算和未对账标记，不暴露目标 Session ID。
+- `/prepare-autonomous-life` 以 Owner 操作为前提，将当前持久 Activity Session 加入已有 Life allowlist 并标记待应用；`externalMessageSessionIds` 保持默认空列表，不绕过 QQ Scene 授权。
+

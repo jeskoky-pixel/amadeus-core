@@ -180,6 +180,35 @@ export class CoreRuntime {
     if(this.status!=='ready')throw Error('CORE_NOT_READY');
     const session=await this.activity.session();this.configureExplorationPlatforms();return {sessionId:session.id};
   });}
+  /**
+   * Opt the persistent Core Activity Session into Life delivery without
+   * granting external-message permission. This is an explicit owner action;
+   * it only writes the existing Life config and leaves the Host scheduler as
+   * the sole wake implementation. Applying the pending config performs the
+   * normal safe Life restart.
+   */
+  prepareAutonomousLife(){return this.serial(async()=>{
+    if(this.status!=='ready')throw Error('CORE_NOT_READY');
+    if(!this.store.state.modules.life.enabled||!this.bridges.life?.api)throw Error('CORE_LIFE_REQUIRED');
+    assertIdle(this.ctx,this.store.state.workspaceId);
+    const session=await this.activity.session();
+    member(this.ctx,this.store.state.workspaceId,session.id);
+    const current=this.effectiveConfig('life');
+    const allowed=[...new Set([...(Array.isArray(current.allowedSessionIds)?current.allowedSessionIds:[]),session.id])];
+    const external=(Array.isArray(current.externalMessageSessionIds)?current.externalMessageSessionIds:[]).filter(id=>allowed.includes(id));
+    const next={...current,wakeDeliveryEnabled:true,allowedSessionIds:allowed,externalMessageSessionIds:external};
+    const result=definitions.life.Config['~standard'].validate(next);
+    if(result.issues)throw Error('CORE_LIFE_CONFIG_INVALID');
+    this.store.update(this.store.state.revision,s=>{s.modules.life.config=next;});
+    return {sessionId:session.id,requiresApply:true,externalMessageOptIn:false,lifeDelivery:this.lifeDelivery()};
+  });}
+  lifeDelivery(){
+    try{
+      const delivery=this.bridges.life?.api?.getHealth?.()?.delivery;
+      if(!delivery||typeof delivery!=='object')return null;
+      return {state:delivery.state??'unknown',reason:delivery.reason??null,enabled:delivery.enabled===true,bound:delivery.bound===true,allowedSessions:Number(delivery.allowedSessions)||0,intervalMs:delivery.intervalMs??null,maxPerDrive:delivery.maxPerDrive??null,timerActive:delivery.timerActive===true,reconciliation:delivery.reconciliation??null,unresolvedWakes:delivery.unresolvedWakes===true,idle:delivery.idle?.enabled===true,budget:delivery.budget?.enabled===true,missing:Array.isArray(delivery.missing)?delivery.missing:[]};
+    }catch{return {state:'unavailable',reason:'health_read_failed',enabled:false,bound:false,allowedSessions:0,intervalMs:null,maxPerDrive:null,timerActive:false,reconciliation:null,unresolvedWakes:false,idle:false,budget:false,missing:[]};}
+  }
   effectiveConfig(n) {
     if (!MODULES.includes(n)) throw Error('CORE_MODULE_INVALID');
     const saved = this.store.state.modules[n].config;
@@ -268,6 +297,7 @@ export class CoreRuntime {
       explorationEnabled:this.store.state.explorationEnabled===true,
       activityBudgetMs:this.store.state.activityBudgetMs??120000,
       mcp:this.mcp.overview(),
+      lifeDelivery:this.lifeDelivery(),
       sessions:(host(this.ctx,'workspaceRegistry')?.get(this.store.state.workspaceId)?.sessionIds??[]).map(id=>{
         const s=host(this.ctx,'sessions')?.get(id);return {id,title:s?.header?.title??id};
       }),
@@ -301,3 +331,4 @@ export class CoreRuntime {
   rollbackData(input){return this.serial(()=>rollbackData(this,input));}
   async dispose() { this.status='stopping';await this.accounts.dispose();await this.mcp.dispose();await this.tail; await this.stopModules(); this.release?.(); this.release = null; this.removeLegacyGuard?.();this.status = 'stopped'; }
 }
+

@@ -461,6 +461,12 @@ function CorePanel({ctx,views,formsService,onClose}){
    h('div',{className:'core-actions core-actions--start'},
     h('button',{type:'button',className:'core-btn',disabled:busy||status?.status!=='ready',onClick:()=>action(()=>api('/simulate',{}))},t('运行两个模拟平台的只读验收','Run two simulated read-only platforms')),
     h('button',{type:'button',className:'core-btn',disabled:busy||status?.status!=='ready',onClick:()=>action(()=>api('/prepare-exploration',{}))},t('准备持久活动会话','Prepare persistent Activity Session'))),
+   h('div',{className:'core-module-grid'},
+    h('div',{className:'core-module'},h('strong',null,t('Life 唤醒','Life wake')),h('span',{className:'core-badge core-badge--'+(status?.lifeDelivery?.state==='active'?'ok':status?.lifeDelivery?.state==='degraded'?'warn':'plain')},status?.lifeDelivery?.state??t('不可用','Unavailable'))),
+    h('div',{className:'core-module'},h('strong',null,t('唤醒会话','Wake sessions')),h('span',null,status?.lifeDelivery?.allowedSessions??0)),
+    h('div',{className:'core-module'},h('strong',null,t('外发提示','External-message opt-in')),h('span',null,t('由 Life/QQ 单独授权','Separate Life/QQ opt-in')))),
+   h('div',{className:'core-actions'},
+    h('button',{type:'button',className:'core-btn',disabled:busy||status?.status!=='ready'||!status?.modules?.life?.mounted||!status?.activity?.sessionId,onClick:()=>action(()=>api('/prepare-autonomous-life',{}))},t('绑定活动会话并启用 Life 唤醒','Bind Activity Session and enable Life wake'))),
    h('label',{className:'core-switch'},h('input',{type:'checkbox',checked:status?.explorationEnabled===true,disabled:busy,onChange:e=>action(()=>api('/configure',{revision:status.revision,explorationEnabled:e.target.checked}))}),h('span',null,t('允许活动会话自主使用已授权平台能力（默认关闭）','Allow Activity Session to use authorized platform capabilities (off by default)'))),
    h('div',{className:'core-fields'},
     h('label',{className:'core-field'},h('span',{className:'core-field-label'},t('单次活动总时限','Activity wall-clock limit')),h('input',{type:'number',min:10,max:300,className:'core-input',key:status?.activityBudgetMs,defaultValue:(status?.activityBudgetMs??120000)/1000,onBlur:e=>{const value=Number(e.target.value)*1000;if(value!==status.activityBudgetMs)action(()=>api('/configure',{revision:status.revision,activityBudgetMs:value}));}}),h('small',{className:'core-field-hint'},t('秒，包含模型思考；下次活动生效。','Seconds, including model thinking; next activity.'))),
@@ -469,7 +475,7 @@ function CorePanel({ctx,views,formsService,onClose}){
    h('div',{className:'core-actions'},
     h('button',{type:'button',className:'core-btn',disabled:busy||status?.activity?.phase!=='Paused',onClick:()=>action(()=>api('/activity',{action:'resume'}))},t('在原预算内恢复活动','Resume within original budget')),
     h('button',{type:'button',className:'core-btn',disabled:busy||status?.activity?.phase==='Idle',onClick:()=>action(()=>api('/activity',{action:'finish'}))},t('安全结束当前活动','Safely finish current activity'))),
-   h('p',{className:'core-note'},t('仅在上面的持久活动会话中生效。可以通过 Life 配置唤醒机会，或在 DSH 中打开该会话交谈；不会自动创建第二套调度。真实平台需要单独开启权限，失败不会切换为模拟内容。','Only the persistent Activity Session may use these tools. Configure wake opportunities in Life or open this Session in DSH. Core adds no second scheduler. Live platforms require separate permissions; errors never fall back to mock content.'))),
+   h('p',{className:'core-note'},t('按钮只会把当前活动会话加入 Life allowlist 并启用已有 Host 唤醒；保存后需应用待重启配置。外发提示仍默认关闭，QQ 发送还需目标 Scene 自己的授权。不会创建第二套调度。','This action only adds the Activity Session to Life\'s allowlist and enables the existing Host wake; apply the pending restart afterward. External-message guidance stays off, and QQ sending still requires target Scene authorization. No second scheduler is created.'))),
   h('section',{className:'core-card'},
    h('div',{className:'core-card-head'},h('div',null,h('h2',null,t('模块','Modules')),h('p',{className:'core-card-sub'},t('Life 配置保存后需应用；State 配置保存后实时生效。应用时拒绝中断活动模型回合。','Apply Life changes; State changes take effect live. Applying refuses to interrupt active model turns.')))),
    h('div',{className:'core-fields'},...modules.map(([name,value])=>h('label',{key:name,className:'core-switch'},h('input',{type:'checkbox',checked:value.enabled,disabled:busy,onChange:e=>action(()=>api('/configure',{revision:status.revision,module:name,enabled:e.target.checked}))}),h('span',{className:'core-field-label'},moduleLabel(name),h('code',null,name)),h('span',{className:'core-badge core-badge--'+(value.mounted?'ok':value.enabled?'warn':'plain')},value.mounted?t('运行中','running'):value.enabled?t('未挂载','inactive'):t('已停用','disabled')))))),
@@ -516,3 +522,4 @@ return {inject:['slots','locale','configForms'],apply(ctx){
  ctx.slots.inject('settings.section',()=>ctx.slots.register({name:'settings.section',id:'amadeus-core',order:23,label:()=> 'Amadeus Core'},()=>h(CorePanel,{ctx,views,formsService:configForms})));
  ctx.slots.inject('sidebar.footer.action',()=>ctx.slots.register({name:'sidebar.footer.action',id:'amadeus-core',order:5,label:()=> 'Amadeus Core'},()=>h(CoreLauncher,{ctx,views,formsService:configForms})));
 }};
+

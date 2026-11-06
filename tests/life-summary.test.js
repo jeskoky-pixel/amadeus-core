@@ -92,3 +92,51 @@ test('owner-only life summary is absent from the model-facing Core health servic
   assert.equal(Object.hasOwn(runtime.api().getHealth(), 'lifeSummary'), false)
   assert.equal(Object.hasOwn(runtime.overview(), 'lifeSummary'), true)
 })
+
+test('Core exposes bounded Life delivery health without leaking target ids', () => {
+  const runtime = Object.create(CoreRuntime.prototype)
+  runtime.bridges = { life: { api: { getHealth: () => ({ delivery: {
+    state: 'active', enabled: true, bound: true, allowedSessions: 1,
+    intervalMs: 60000, maxPerDrive: 1, timerActive: true,
+    unresolvedWakes: false, idle: { enabled: false }, budget: { enabled: true },
+  } }) } } }
+  const result = runtime.lifeDelivery()
+  assert.deepEqual(result, {
+    state: 'active', reason: null, enabled: true, bound: true,
+    allowedSessions: 1, intervalMs: 60000, maxPerDrive: 1,
+    timerActive: true, reconciliation: null, unresolvedWakes: false,
+    idle: false, budget: true, missing: [],
+  })
+  assert.equal('sessionIds' in result, false)
+})
+
+test('explicit autonomous Life preparation only changes existing Life config', async () => {
+  const runtime = Object.create(CoreRuntime.prototype)
+  runtime.status = 'ready'
+  const session = { id: 'session-1', header: { origin: 'user' }, snapshotEvents: () => [] }
+  const workspace = { id: 'workspace-1', sessionIds: ['session-1'] }
+  runtime.ctx = {
+    workspaceRegistry: { list: () => [workspace], get: id => id === workspace.id ? workspace : undefined },
+    sessions: { get: id => id === session.id ? session : undefined },
+  }
+  runtime.store = {
+    state: { revision: 3, workspaceId: 'workspace-1', modules: { life: { enabled: true, config: {
+      allowedSessionIds: [], externalMessageSessionIds: [], wakeDeliveryEnabled: false,
+    } } } },
+    update(revision, fn) { assert.equal(revision, 3); fn(this.state); this.state.revision += 1 },
+  }
+  runtime.bridges = { life: { api: { getHealth: () => ({ delivery: { state: 'disabled' } }) } } }
+  runtime.activity = { session: async () => ({ id: 'session-1' }) }
+  runtime.serial = fn => fn()
+  runtime.effectiveConfig = () => ({ allowedSessionIds: [], externalMessageSessionIds: [], wakeDeliveryEnabled: false })
+  runtime.lifeDelivery = CoreRuntime.prototype.lifeDelivery.bind(runtime)
+  runtime.prepareAutonomousLife = CoreRuntime.prototype.prepareAutonomousLife.bind(runtime)
+  const result = await runtime.prepareAutonomousLife()
+  assert.equal(result.sessionId, 'session-1')
+  assert.equal(result.requiresApply, true)
+  assert.equal(result.externalMessageOptIn, false)
+  assert.deepEqual(runtime.store.state.modules.life.config.allowedSessionIds, ['session-1'])
+  assert.deepEqual(runtime.store.state.modules.life.config.externalMessageSessionIds, [])
+  assert.equal(runtime.store.state.modules.life.config.wakeDeliveryEnabled, true)
+})
+
