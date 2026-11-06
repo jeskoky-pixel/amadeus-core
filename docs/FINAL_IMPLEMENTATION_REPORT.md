@@ -22,3 +22,9 @@
 
 Core 代码、构建和测试达到可审查交付状态。当前 PR #4 仍不应提前合并或正式发布。当前最有价值的后续验证是让一个独立 QQ 账号向授权私聊或群聊发送一条自然消息，并记录 OneBot event、Session turn 和 reply message id；随后观察一次真实 Life wake 是否形成可回读经历。
 
+## 2026-11-07 继续验收结论
+
+主环境当前可以直接试用普通 DSH 对话和已授权 QQ 私聊/群聊的既有能力。真实 QQ 私聊已确认入站、模型响应和 NapCat 回执；历史记录也能回忆已保存的平台文本经历。Life 概况卡和显式唤醒绑定入口已随 Core 安装，但当前既有 QQ Session 的权限持久状态仍未让 `life_shared_read`/`life_health` 出现在模型可用工具中，因此 QQ 中暂时不能读取完整 Life 概况，主动 QQ 外发和自然 Life 闭环仍待后续授权绑定与现场观察。
+
+本轮没有修改 Main SOUL，没有清空或迁移 Memory/Experience/Life/State 数据，没有新增调度器，也没有合并或正式发布。
+
