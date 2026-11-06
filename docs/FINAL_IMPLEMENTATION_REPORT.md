@@ -10,7 +10,7 @@
 - 新增设置页 Life 概况卡，显示下一次复查、当前活动、最近经历和兴趣。
 - 概况只读取现有 Life、State、Experience 权威接口，不创建记忆、意图、活动或新的数据库。
 - 保留 Core 原有的 Life 唤醒、历史恢复、外部消息 Session 绑定和权限边界。
-- 在 Core 设置中显示 Life Host 唤醒健康状态，并增加“绑定活动会话并启用 Life 唤醒”的显式 Owner 操作；该操作只写入现有 Life 配置，默认不加入外发提示 allowlist，应用后由 Life 原生 Host 负责唤醒。
+- 在 Core 设置中显示 Life Host 唤醒健康状态，并增加“绑定活动会话并启用 Life 唤醒”的显式 Owner 操作；该操作只写入现有 Life 配置，不新增外发提示授权，应用后由 Life 原生 Host 负责唤醒。
 - 保留 Core 现有 Mneme/Memory 数据结构、ACL、图谱和 Experience 证据链。
 - 增加隔离单元测试，覆盖跨模块读取、无写入行为、Life delivery 健康摘要和显式唤醒配置。
 

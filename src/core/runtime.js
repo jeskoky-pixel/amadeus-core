@@ -200,7 +200,7 @@ export class CoreRuntime {
     const result=definitions.life.Config['~standard'].validate(next);
     if(result.issues)throw Error('CORE_LIFE_CONFIG_INVALID');
     this.store.update(this.store.state.revision,s=>{s.modules.life.config=next;});
-    return {sessionId:session.id,requiresApply:true,externalMessageOptIn:false,lifeDelivery:this.lifeDelivery()};
+    return {sessionId:session.id,requiresApply:true,externalMessageOptIn:external.includes(session.id),lifeDelivery:this.lifeDelivery()};
   });}
   lifeDelivery(){
     try{

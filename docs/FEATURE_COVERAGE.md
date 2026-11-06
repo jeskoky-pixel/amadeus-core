@@ -30,5 +30,5 @@
 - 最近经历只显示 `stored`/`completed`，pending 经历单独计数。
 - 读取失败进入 `errors` 和来源状态；Owner 概况不进入 `amadeusCore.getHealth()` 模型侧服务。
 - `lifeDelivery` 只读摘要进入 Core 状态页，保留状态、绑定、计时器、预算和未对账标记，不暴露目标 Session ID。
-- `/prepare-autonomous-life` 以 Owner 操作为前提，将当前持久 Activity Session 加入已有 Life allowlist 并标记待应用；`externalMessageSessionIds` 保持默认空列表，不绕过 QQ Scene 授权。
+- `/prepare-autonomous-life` 以 Owner 操作为前提，将当前持久 Activity Session 加入已有 Life allowlist 并标记待应用；不会新增 `externalMessageSessionIds`，也不绕过 QQ Scene 授权。
 
