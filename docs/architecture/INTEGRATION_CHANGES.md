@@ -69,3 +69,9 @@ Further real-run regressions in the same cycle:
 - `CoreRuntime.overview()` 暴露 `lifeSummary`；客户端只渲染派生字段，不创建调度、记忆或平台消息。
 - 没有修改 Mneme schema、Memory/Experience ACL、用户数据、QQ 仓库或平台凭据。
 - 新增隔离测试 `tests/life-summary.test.js`；构建输出继续使用单一 Core loader。
+
+## 2026-11-07 PR #4 review follow-up
+
+- Restored the original Memory and State native view route; Life summary is now an additive branch and cannot replace Mneme or State rendering.
+- Life summary reads Life admin lists with bounded pagination (200 per page, 5000 item ceiling), reports partial/unavailable sources, distinguishes running/pending/paused/uncertain activities, and only exposes stored/completed experiences as recent completed experience.
+- `lifeSummary` remains owner HTTP/UI data. `amadeusCore.getHealth()` omits it so the model-facing service does not receive owner ledger details through that entry point.

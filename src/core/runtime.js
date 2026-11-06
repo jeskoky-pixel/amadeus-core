@@ -255,8 +255,8 @@ export class CoreRuntime {
       return this.overview();
     });
   }
-  overview() {
-    const lifeSummary = buildLifeSummary(this);
+  overview({ includeOwnerDetails = true } = {}) {
+    const lifeSummary = includeOwnerDetails ? buildLifeSummary(this) : null;
     return { version: '0.2.0-alpha.6', status: this.status, problem: this.problem,
       workspaceId: this.store.state.workspaceId, revision: this.store.state.revision,
       runningRevision: this.runningRevision, pendingRestart: this.store.state.revision !== this.runningRevision,
@@ -264,7 +264,7 @@ export class CoreRuntime {
       workspaces: (host(this.ctx, 'workspaceRegistry')?.list?.() ?? []).map(w => ({ id: w.id, title: w.title })),
       platforms:this.platforms.list().filter(p=>!p.simulated),
       simulations:this.platforms.list().filter(p=>p.simulated),activity:this.activity.summary(),experiences:this.experiences.ownerList(),
-      lifeSummary,
+      ...(lifeSummary ? { lifeSummary } : {}),
       explorationEnabled:this.store.state.explorationEnabled===true,
       activityBudgetMs:this.store.state.activityBudgetMs??120000,
       mcp:this.mcp.overview(),
@@ -274,7 +274,7 @@ export class CoreRuntime {
       dataGeneration:this.store.state.dataGeneration??'original',canRollback:Object.hasOwn(this.store.state,'previousDataGeneration'),
     };
   }
-  api() { return Object.freeze({ contractVersion: 1, getHealth: () => this.overview(),
+  api() { return Object.freeze({ contractVersion: 1, getHealth: () => this.overview({ includeOwnerDetails: false }),
     assertSession: id => member(this.ctx, this.store.state.workspaceId, id),
     readExperience:(eventId,sessionId)=>this.experiences.read(eventId,sessionId) }); }
   simulate(){return this.serial(async()=>{

@@ -399,6 +399,21 @@ function matchPersonaTheme(frame,theme,fontFamily){
   if(!style){style=doc.createElement('link');style.id='core-persona-embed-theme';style.rel='stylesheet';style.href='/api/amadeus-core/persona-embed.css';doc.head.appendChild(style)}
  }catch{}
 }
+function renderModuleTab({tab,status,views,lifeSummary,t,h}){
+ const empty=h('div',{className:'core-empty'},t('请先选择工作区并应用配置，或启用此模块。','Choose a workspace and apply configuration, or enable this module.'));
+ if(!status?.modules?.[tab]?.mounted)return empty;
+ if(tab==='memory'||tab==='state')return views[tab]?.()??empty;
+ const summary=lifeSummary&&h('section',{className:'core-card'},
+  h('div',{className:'core-card-head'},h('h2',null,t('当前生活概况','Current life summary')),h('span',{className:'core-badge core-badge--plain'},t('派生视图','Derived view'))),
+  h('p',{className:'core-card-sub'},t('概况由 Life、State 和经历记录生成，不创建新的记忆或调度。','Derived from Life, State and Experiences; it creates no memory or scheduler.')),
+  lifeSummary.errors?.length?h('div',{className:'core-alert',role:'status'},t(`部分数据不可用：${lifeSummary.errors.join('；')}`,`Some data is unavailable: ${lifeSummary.errors.join('; ')}`)):null,
+  h('div',{className:'core-module-grid'},
+   h('div',{className:'core-module'},h('strong',null,t('下一次复查','Next review')),h('span',null,lifeSummary.life.nextReviewAt||t('暂无','None'))),
+   h('div',{className:'core-module'},h('strong',null,t('当前运行活动','Running activity')),h('span',null,lifeSummary.life.currentActivity?.description||t('无','None'))),
+   h('div',{className:'core-module'},h('strong',null,t('最近已保存经历','Latest stored experience')),h('span',null,lifeSummary.recentExperience?.summary||t('暂无','None'))),
+   h('div',{className:'core-module'},h('strong',null,t('兴趣','Interests')),h('span',null,lifeSummary.state.interests.map(i=>i.name).filter(Boolean).join('、')||t('暂无','None')))));
+ return h('div',null,views.life?.(),summary);
+}
 function CorePanel({ctx,views,formsService,onClose}){
  const [tab,setTab]=useState('overview'),[status,setStatus]=useState(null),[error,setError]=useState(''),[workspace,setWorkspace]=useState(''),[busy,setBusy]=useState(false),[english,setEnglish]=useState(false);
  const [sources,setSources]=useState({memory:'',life:'',state:'',persona:''}),[offlineConfirmed,setOfflineConfirmed]=useState(false);
@@ -432,7 +447,7 @@ function CorePanel({ctx,views,formsService,onClose}){
  ];
  let content;
  if(tab==='mcp')content=h(McpPanel,{state:status?.mcp,sessions:status?.sessions??[],refresh,t});
- else if(tab==='life')content=status?.modules?.life?.mounted?h('div',null,views.life?.(),lifeSummary&&h('section',{className:'core-card'},h('div',{className:'core-card-head'},h('h2',null,t('当前生活概况','Current life summary')),h('span',{className:'core-badge core-badge--plain'},t('派生视图','Derived view'))),h('p',{className:'core-card-sub'},t('概况由 Life、State 和经历记录生成，不创建新的记忆或调度。','Derived from Life, State and Experiences; it creates no memory or scheduler.')),h('div',{className:'core-module-grid'},h('div',{className:'core-module'},h('strong',null,t('下一次复查','Next review')),h('span',null,lifeSummary.life.nextReviewAt||t('暂无','None'))),h('div',{className:'core-module'},h('strong',null,t('当前活动','Active activity')),h('span',null,lifeSummary.life.focus?.description||t('无，可休息','None; rest is available'))),h('div',{className:'core-module'},h('strong',null,t('最近经历','Recent experience')),h('span',null,lifeSummary.recentExperience?.summary||t('暂无','None'))),h('div',{className:'core-module'},h('strong',null,t('兴趣','Interests')),h('span',null,lifeSummary.state.interests.map(i=>i.name).filter(Boolean).join('、')||t('暂无','None'))))))) : h('div',{className:'core-empty'},t('请先选择工作区并应用配置，或启用此模块。','Choose a workspace and apply configuration, or enable this module.'));
+ else if(['memory','state','life'].includes(tab))content=renderModuleTab({tab,status,views,lifeSummary,t,h});
  else if(tab==='persona')content=status?.modules?.persona?.mounted?h('div',{className:'core-persona-host'},h('iframe',{ref:personaFrame,title:'Amadeus Persona',src:'/api/amadeus-persona/console',className:'core-persona-frame',onLoad:()=>matchPersonaTheme(personaFrame.current,theme,getComputedStyle(shellRef.current||personaFrame.current).fontFamily)})):h('div',{className:'core-empty'},t('请启用人格模块。','Enable the Persona module.'));
  else if(tab==='platforms')content=h(PlatformPanel,{status,refresh,t});
  else if(tab==='experiences')content=h('div',{className:'core-settings'},h('section',{className:'core-card'},h('h2',null,t('经历时间线','Experience timeline')),h('p',{className:'core-card-sub'},t('按来源区分模拟与真实读取；标题和文本不代表看过完整视频。','Evidence distinguishes simulation and live reads; metadata is not full video understanding.')),(status?.experiences??[]).length?status.experiences.map(e=>h('article',{key:e.eventId,className:'core-module',style:{display:'block',margin:'10px 0'}},h('strong',null,e.platform),h('p',{style:{margin:'3px 0'}},`${e.occurredAt} · ${e.status}`),h('code',null,e.eventId))):h('p',{className:'core-note'},t('暂无经历记录。','No experiences yet.'))));
