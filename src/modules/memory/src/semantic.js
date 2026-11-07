@@ -28,6 +28,7 @@ import { LocalReranker } from "./reranker.js";
  */
 export async function backfillMissingEmbeddings({
   store, embedder, vectorIndex, logger,
+  isCancelled,
   // maxTotal: 0 = no cap (drain the whole backlog this run). The default stays
   // modest so a boot never floods a provider, but the cap is a caller choice
   // now instead of a hardcoded one — the fixed 500 meant a 4k-row backlog
@@ -46,13 +47,17 @@ export async function backfillMissingEmbeddings({
   let indexed = 0;
   let processed = 0;
   let failed = 0;
+  let cancelled = false;
   for (let done = 0; unlimited || done < maxTotal;) {
+    if (isCancelled?.()) { cancelled = true; break; }
     const rows = pick(batchSize);
     if (!rows.length) break;
     for (const row of rows) {
+      if (isCancelled?.()) { cancelled = true; break; }
       try {
         const text = [row.title, row.content].filter(Boolean).join("\n");
         const vector = await embedder.embedSingle(text);
+        if (isCancelled?.()) { cancelled = true; break; }
         if (vector?.length) {
           store.setEmbedding(row.id, vector, model);
           indexed++;
@@ -61,17 +66,20 @@ export async function backfillMissingEmbeddings({
         }
       } catch { failed++; /* skip the bad row, but count it */ }
     }
+    if (cancelled) break;
     done += rows.length;
     processed += rows.length;
     // Rate limit: space out batches so the provider is not hammered.
+    if (isCancelled?.()) { cancelled = true; break; }
     if (pick(1).length) await new Promise((r) => setTimeout(r, rateLimitMs));
   }
   if (indexed > 0 && model) vectorIndex.markModel?.(model, embedder.dimension);
   // stillStale answers "did it actually finish?". The old return value was a
   // bare indexed count, so a run that hit the cap looked exactly like a run
   // that drained the backlog.
-  const stillStale = pick(1).length > 0;
-  const finishReason = stillStale ? "capped" : (failed > 0 && indexed === 0 ? "all-failed" : "drained");
+  const stillStale = cancelled ? true : pick(1).length > 0;
+  const finishReason = cancelled ? "cancelled"
+    : (stillStale ? "capped" : (failed > 0 && indexed === 0 ? "all-failed" : "drained"));
   logger?.info?.(
     `[dsh-mneme] auto-reindex backfilled ${indexed} embeddings (processed=${processed}, failed=${failed}, finish=${finishReason})`
   );
@@ -104,6 +112,18 @@ export function createSemantic({ store, service, settings, cfg, logger, vectorIn
   // boot 回填首查计时器。搬移前在 index.js 是裸 setTimeout(不参与卸载清理);
   // 纳入 dispose 是修悬挂,不改变启动行为。
   let reindexTimer = null;
+  let disposed = false;
+  let disposePromise = null;
+  const pending = new Set();
+  const track = (promise) => {
+    const tracked = Promise.resolve(promise);
+    pending.add(tracked);
+    tracked.then(() => pending.delete(tracked), () => pending.delete(tracked));
+    return tracked;
+  };
+  const applyHumanEditsSafely = () => {
+    if (!disposed) applyHumanEdits();
+  };
   // Last boot-backfill summary, exposed via backfillStatus() so "did it
   // finish?" has an answer other than a log line.
   let lastBackfill = null;
@@ -113,7 +133,7 @@ export function createSemantic({ store, service, settings, cfg, logger, vectorIn
     // pulls in ONNX/transformers), no reranker, no boot backfill (the preset
     // also cleared autoReindexOnBoot). Recall degrades to keyword search and
     // human mirror edits still merge on boot.
-    applyHumanEdits();
+    applyHumanEditsSafely();
   } else if (cfg.embedProvider === "openai") {
     // vectorIndex is passed so the legacy OpenAI embedder records the producing
     // model fingerprint after each successful embed (Bug3).
@@ -131,7 +151,7 @@ export function createSemantic({ store, service, settings, cfg, logger, vectorIn
       );
     }
     // legacy OpenAI embedder needs no async init → human edits apply right away
-    applyHumanEdits();
+    applyHumanEditsSafely();
   } else {
     try {
       embedder = createEmbedderByProvider(cfg.embedProvider, {
@@ -153,27 +173,43 @@ export function createSemantic({ store, service, settings, cfg, logger, vectorIn
       service.setEmbedder(embedder);
       // issue #6: wait for extractor init before applying human edits, so
       // scheduled embeddings see a ready embedder.
-      const bootEmbedder = () => embedder.init()
-        .then(() => { applyHumanEdits(); return true; })
-        .catch(() => false);
+      const bootEmbedder = () => {
+        if (disposed) return Promise.resolve(false);
+        return track(Promise.resolve()
+          .then(() => embedder.init())
+          .then(() => {
+            if (disposed) return false;
+            applyHumanEditsSafely();
+            return true;
+          })
+          .catch((error) => {
+            if (!disposed) logger?.warn?.(`[dsh-mneme] embedder init failed: ${String(error)}`);
+            return false;
+          }));
+      };
       // #118: the old one-shot probe permanently degraded search to keyword
       // when Ollama was briefly unreachable at boot (recoverable only by
       // restart). Retry briefly (5 attempts total: 1 initial + 4 × 15s);
       // search degrades to keyword meanwhile because per-query embed failures
       // are swallowed.
       bootEmbedder().then((ok) => {
+        if (disposed) return;
         if (ok) return;
         let tries = 4;
         const retry = () => {
           if (tries-- <= 0) {
+            if (disposed) return;
             logger?.warn?.("[dsh-mneme] embedder init retries exhausted, search degrades to keyword");
             service.setEmbedder(null);
-            applyHumanEdits();
+            applyHumanEditsSafely();
             return;
           }
-          embedRetryTimer = setTimeout(async () => {
-            if (await bootEmbedder()) return;
-            retry();
+          embedRetryTimer = setTimeout(() => {
+            embedRetryTimer = null;
+            if (disposed) return;
+            bootEmbedder().then((ready) => {
+              if (!ready && !disposed) retry();
+            });
           }, 15_000);
         };
         logger?.warn?.("[dsh-mneme] embedder init failed, retrying");
@@ -181,7 +217,7 @@ export function createSemantic({ store, service, settings, cfg, logger, vectorIn
       });
     } catch (error) {
       logger?.warn?.(`[dsh-mneme] embedder unavailable, search degrades to keyword: ${String(error)}`);
-      applyHumanEdits();
+      applyHumanEditsSafely();
     }
   }
 
@@ -207,10 +243,14 @@ export function createSemantic({ store, service, settings, cfg, logger, vectorIn
         logger
       });
       service.setReranker(reranker);
-      reranker.init().catch((error) => {
-        logger?.warn?.(`[dsh-mneme] reranker init failed, rerank disabled: ${String(error)}`);
-        service.setReranker(null);
-      });
+      track(Promise.resolve()
+        .then(() => reranker.init())
+        .catch((error) => {
+          if (!disposed) {
+            logger?.warn?.(`[dsh-mneme] reranker init failed, rerank disabled: ${String(error)}`);
+            service.setReranker(null);
+          }
+        }));
     } catch (error) {
       logger?.warn?.(`[dsh-mneme] reranker unavailable, rerank disabled: ${String(error)}`);
     }
@@ -225,6 +265,7 @@ export function createSemantic({ store, service, settings, cfg, logger, vectorIn
   function scheduleAutoReindex() {
     if (cfg.autoReindexOnBoot === false) return;
     const attempt = (tries) => {
+      if (disposed) return;
       try {
         if (!embedder || typeof embedder.embedSingle !== "function") return;
         if ("ready" in embedder && embedder.ready !== true) {
@@ -232,7 +273,10 @@ export function createSemantic({ store, service, settings, cfg, logger, vectorIn
           // before giving up on this boot (next boot retries).
           // CodeRabbit on #365:嵌套重试计时器同样入册,否则 dispose 后仍可能
           // 对已关库跑 needsEmbedding(有 try/catch 兜底只是日志噪声,但状态要收干净)。
-          if (tries > 0) reindexTimer = setTimeout(() => attempt(tries - 1), 2000);
+          if (tries > 0) reindexTimer = setTimeout(() => {
+            reindexTimer = null;
+            attempt(tries - 1);
+          }, 2000);
           return;
         }
         const model = embedder.modelHash;
@@ -249,16 +293,20 @@ export function createSemantic({ store, service, settings, cfg, logger, vectorIn
           state: "running", startedAt: new Date().toISOString(),
           maxTotal: cfg.reindexMaxPerBoot, batchSize: cfg.reindexBatchSize
         };
-        backfillMissingEmbeddings({
+        const backfill = backfillMissingEmbeddings({
           store, embedder, vectorIndex, logger,
+          isCancelled: () => disposed,
           maxTotal: cfg.reindexMaxPerBoot,
           batchSize: cfg.reindexBatchSize,
           rateLimitMs: cfg.reindexRateLimitMs
-        })
+        });
+        track(backfill)
           .then((summary) => {
+            if (disposed) return;
             lastBackfill = { ...summary, state: "finished" };
           })
           .catch((error) => {
+            if (disposed) return;
             lastBackfill = { state: "error", error: String(error), startedAt: lastBackfill?.startedAt };
             logger?.warn?.(`[dsh-mneme] auto-reindex failed: ${String(error)}`);
           });
@@ -278,8 +326,13 @@ export function createSemantic({ store, service, settings, cfg, logger, vectorIn
       return lastBackfill;
     },
     dispose() {
+      if (disposePromise) return disposePromise;
+      disposed = true;
       if (embedRetryTimer !== null) { clearTimeout(embedRetryTimer); embedRetryTimer = null; }
       if (reindexTimer !== null) { clearTimeout(reindexTimer); reindexTimer = null; }
+      disposePromise = Promise.allSettled([...pending]).then(() => undefined);
+      return disposePromise;
     }
   };
 }
+
