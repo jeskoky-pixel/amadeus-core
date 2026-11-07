@@ -1463,6 +1463,10 @@ export const apply = (ctx, config) => {
     if (dream) await dream.dispose();
     if (sleep) sleep.dispose();
     await disposeSceneAclHandshake();
+    // Stop semantic retry/backfill timers before closing SQLite. Otherwise an
+    // in-flight embedder retry can call applyHumanEdits after unload and turn a
+    // recoverable shutdown into `database is not open`.
+    semantic?.dispose?.();
     store.close();
   };
 };
