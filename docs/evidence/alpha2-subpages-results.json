@@ -1,0 +1,206 @@
+{
+  "checks": [
+    {
+      "theme": "light",
+      "key": "state",
+      "title": "▦总览"
+    },
+    {
+      "theme": "light",
+      "key": "state",
+      "title": "♡状态演化"
+    },
+    {
+      "theme": "light",
+      "key": "state",
+      "title": "☆兴趣管理"
+    },
+    {
+      "theme": "light",
+      "key": "state",
+      "title": "≡事件与审计"
+    },
+    {
+      "theme": "light",
+      "key": "state",
+      "title": "◌上下文与模型工具"
+    },
+    {
+      "theme": "light",
+      "key": "state",
+      "title": "⚙会话规则"
+    },
+    {
+      "theme": "light",
+      "key": "state",
+      "title": "▤数据与诊断"
+    },
+    {
+      "theme": "light",
+      "key": "life",
+      "title": "总览"
+    },
+    {
+      "theme": "light",
+      "key": "life",
+      "title": "自主唤醒"
+    },
+    {
+      "theme": "light",
+      "key": "life",
+      "title": "会话规则"
+    },
+    {
+      "theme": "light",
+      "key": "life",
+      "title": "意图管理"
+    },
+    {
+      "theme": "light",
+      "key": "life",
+      "title": "活动中心"
+    },
+    {
+      "theme": "light",
+      "key": "life",
+      "title": "预算与注意力"
+    },
+    {
+      "theme": "light",
+      "key": "life",
+      "title": "身份与工作区"
+    },
+    {
+      "theme": "light",
+      "key": "life",
+      "title": "数据与诊断"
+    },
+    {
+      "theme": "light",
+      "key": "persona",
+      "page": 0
+    },
+    {
+      "theme": "light",
+      "key": "persona",
+      "page": 1
+    },
+    {
+      "theme": "light",
+      "key": "persona",
+      "page": 2
+    },
+    {
+      "theme": "light",
+      "key": "persona",
+      "page": 3
+    },
+    {
+      "theme": "light",
+      "key": "persona",
+      "page": 4
+    },
+    {
+      "theme": "dark",
+      "key": "state",
+      "title": "▦总览"
+    },
+    {
+      "theme": "dark",
+      "key": "state",
+      "title": "♡状态演化"
+    },
+    {
+      "theme": "dark",
+      "key": "state",
+      "title": "☆兴趣管理"
+    },
+    {
+      "theme": "dark",
+      "key": "state",
+      "title": "≡事件与审计"
+    },
+    {
+      "theme": "dark",
+      "key": "state",
+      "title": "◌上下文与模型工具"
+    },
+    {
+      "theme": "dark",
+      "key": "state",
+      "title": "⚙会话规则"
+    },
+    {
+      "theme": "dark",
+      "key": "state",
+      "title": "▤数据与诊断"
+    },
+    {
+      "theme": "dark",
+      "key": "life",
+      "title": "总览"
+    },
+    {
+      "theme": "dark",
+      "key": "life",
+      "title": "自主唤醒"
+    },
+    {
+      "theme": "dark",
+      "key": "life",
+      "title": "会话规则"
+    },
+    {
+      "theme": "dark",
+      "key": "life",
+      "title": "意图管理"
+    },
+    {
+      "theme": "dark",
+      "key": "life",
+      "title": "活动中心"
+    },
+    {
+      "theme": "dark",
+      "key": "life",
+      "title": "预算与注意力"
+    },
+    {
+      "theme": "dark",
+      "key": "life",
+      "title": "身份与工作区"
+    },
+    {
+      "theme": "dark",
+      "key": "life",
+      "title": "数据与诊断"
+    },
+    {
+      "theme": "dark",
+      "key": "persona",
+      "page": 0
+    },
+    {
+      "theme": "dark",
+      "key": "persona",
+      "page": 1
+    },
+    {
+      "theme": "dark",
+      "key": "persona",
+      "page": 2
+    },
+    {
+      "theme": "dark",
+      "key": "persona",
+      "page": 3
+    },
+    {
+      "theme": "dark",
+      "key": "persona",
+      "page": 4
+    }
+  ],
+  "errors": [],
+  "experienceEmptyAndPopulated": true
+}

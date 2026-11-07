@@ -8,7 +8,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-24.04, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -19,6 +19,12 @@ jobs:
       - run: npm ci --ignore-scripts
       - run: npm run build
       - run: npm test
+      - name: Install isolated browser test runtime
+        run: npx playwright-core install --with-deps chromium
+      - name: Browser protocol and DOM fixtures (no live platform requests)
+        run: node --test tests/browser/*.test.js
+        env:
+          CORE_BROWSER_CHANNEL: chromium
       - run: npm run test:modules
       - run: npm run pack:check
       - name: Build candidate archive

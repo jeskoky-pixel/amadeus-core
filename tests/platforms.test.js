@@ -27,7 +27,7 @@ test('registration defaults to disabled with no permissions', async () => {
   const registry = new PlatformRegistry();
   registry.register(adapter('defaults'));
   assert.deepEqual(registry.list(), [{
-    id: 'defaults',
+    id: 'defaults',name:'defaults',version:'1',mode:'simulation',authMethods:[],account:null,autonomous:true,minIntervalMs:0,
     simulated: true,
     enabled: false,
     capabilities: ['read', 'search', 'browse'],

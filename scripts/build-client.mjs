@@ -5,6 +5,7 @@ const sources = { memory: 'lib/client.js', life: 'lib/client.js', state: 'lib/cl
 const factories = [];
 for (const [n, file] of Object.entries(sources)) {
   let source = fs.readFileSync(path.join(root, 'src/modules', n, file), 'utf8');
+  if (n === 'state') source = source.replace("'Independent DSH plugin' : '独立 DSH 插件'", "'Amadeus Core state module' : 'Amadeus Core 状态模块'");
   if (n === 'memory') source = source.replace('exports.apply = apply;', 'exports.coreView = (ctx) => h(MemoryExplorer, {ctx, t: ctx.locale.bind(NS)});\n    exports.apply = apply;');
   factories.push(`${JSON.stringify(n)}: (()=>{let descriptor; const loader={load:x=>{descriptor=x}}; const window = new Proxy(globalThis.window,{get:(target,key)=>{if(key==='__ModuleLoader__')return loader;const value=Reflect.get(target,key,target);return typeof value==='function'?value.bind(target):value}});\n${source}\nreturn descriptor.factory(require);})()`);
 }

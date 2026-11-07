@@ -9,7 +9,7 @@ const result=spawnSync(process.execPath,[npmCli,'pack','--ignore-scripts','--dry
 if(result.status!==0)throw Error(result.stderr);
 const parsed=JSON.parse(result.stdout),pack=Array.isArray(parsed)?parsed[0]:parsed[pkg.name],files=new Set(pack.files.map(f=>f.path));
 assert.equal(pkg.name,'@fg-lab/amadeus-core');assert.equal(pkg.private,true);
-assert.equal(pkg.version,'0.1.0-alpha.1');
+assert.equal(pkg.version,'0.2.0-alpha.5');
 for(const file of ['src/index.js','lib/client.js','cordis.patch.yml','LICENSE','NOTICE.md',
  ...['memory','life','state','persona'].flatMap(n=>[`src/modules/${n}/src/index.js`,`src/modules/${n}/LICENSE`])])assert(files.has(file),`Missing ${file}`);
 for(const file of files){

@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { atomicJson } from './store.js';
+import {verifiedObservation} from '../platforms/registry.js';
 import { member } from './host.js';
 
 // Host-only facade. It is not a model tool or a writable HTTP endpoint.
@@ -19,6 +20,9 @@ export class Experiences {
     const session=member(r.ctx,workspaceId,sessionId), memory=r.bridges.memory;
     if(!memory?.unifiedRuntime) throw Error('CORE_MEMORY_UNAVAILABLE');
     if(typeof platform!=='string'||typeof activityId!=='string'||!Number.isSafeInteger(step)) throw Error('CORE_EXPERIENCE_INVALID');
+    const trusted=verifiedObservation(observation);
+    if(!platform.startsWith('simulation-')&&(!trusted||trusted.platform!==platform||trusted.operation!==operation||trusted.sessionId!==sessionId||trusted.workspaceId!==workspaceId||trusted.activityId!==activityId))throw Error('CORE_EXPERIENCE_UNTRUSTED');
+    const evidenceLevel=trusted?.evidenceLevel??'simulation';
     const text=JSON.stringify(observation);
     if(!text || Buffer.byteLength(text)>65536) throw Error('CORE_EXPERIENCE_LIMIT');
     const dataGeneration=r.store.state.dataGeneration??'original';
@@ -29,16 +33,19 @@ export class Experiences {
     if(entry?.status==='stored') return structuredClone(entry);
     if(!entry) {
       if(this.state.events.length>=10000) throw Error('CORE_EXPERIENCE_CAPACITY');
-      entry={eventId,workspaceId,sessionId,activityId,platform,operation,step,dataGeneration,occurredAt:new Date().toISOString(),status:'pending',memoryId:null};
+      const observed=observation?.observedEvidence;
+      const item=observed?.item;
+      const sourceUrl=typeof (item?.sourceUrl??observed?.sourceUrl)==='string'?(item?.sourceUrl??observed.sourceUrl):null;
+      entry={contentId:item?.id??observed?.contentId??null,sourceUrl,observationSummary:typeof item?.title==='string'?item.title.slice(0,500):`${operation}: returned evidence only`,modelInterpretation:null,permissionScope:'session',eventId,workspaceId,sessionId,activityId,platform,operation,step,dataGeneration,occurredAt:new Date().toISOString(),status:'pending',memoryId:null,evidenceLevel,accountId:trusted?.accountId??null};
       this.state.events.push(entry);this.save();
     }
-    // All current adapters are simulations. Do not let fixture content assert a real action.
-    const event={...entry,evidenceLevel:'simulation',visibility:'session',facts:observation,
-      interpretation:null,actionReceipt:{kind:'simulation',externalAction:false}};
+    // Evidence comes from the registry's private receipt ledger, never model fields.
+    const event={...entry,evidenceLevel,visibility:'session',facts:observation,
+      interpretation:null,actionReceipt:{kind:evidenceLevel,externalAction:trusted?.externalAction===true}};
     const saved=await memory.unifiedRuntime.authorize.run(session,()=>memory.service.saveWithDedupe({
-      id:eventId,type:'history',title:`Simulation: ${platform} ${operation}`,
-      content:JSON.stringify(event),importance:3,tags:['amadeus-experience','simulation'],
-      evidence:[{kind:'simulated-platform',ref:eventId}]
+      id:eventId,type:'history',title:`${evidenceLevel}: ${platform} ${operation}`,
+      content:JSON.stringify(event),importance:3,tags:['amadeus-experience',evidenceLevel],
+      evidence:[{kind:evidenceLevel==='simulation'?'simulated-platform':evidenceLevel==='live-action'?'platform-action':'platform-read',ref:eventId}]
     }));
     if(!saved?.memory?.id) throw Error('CORE_EXPERIENCE_MEMORY_REJECTED');
     member(r.ctx,workspaceId,sessionId);
@@ -47,10 +54,10 @@ export class Experiences {
     if(state&&['read','browse','search','comments','related','subtitles','images'].includes(operation)){
       try{
         const effective=state.effectiveForSession(sessionId);state.requireAccess(effective,'write');
-        const result=await state.recordEvent({identity:effective.identity,type:'exploration_completed',source:'host',trust:'simulation',
-          summary:`Synthetic platform exploration: ${platform} ${operation}; no real platform accessed.`,
-          idempotencyKey:`core:${eventId}`,sourceRef:eventId,evidence:[`simulation:${eventId}`],
-          topic:'模拟平台探索',interestDelta:0.5,scale:0.1,originSessionId:sessionId,occurredAt:entry.occurredAt});
+        const result=await state.recordEvent({identity:effective.identity,type:'exploration_completed',source:'host',trust:evidenceLevel==='simulation'?'simulation':'bounded',
+          summary:`${evidenceLevel}: ${platform} ${operation}; only returned evidence was observed; no visual understanding claimed.`,
+          idempotencyKey:`core:${eventId}`,sourceRef:eventId,evidence:[`${evidenceLevel}:${eventId}`],
+          topic:evidenceLevel==='simulation'?'模拟平台探索':'平台只读探索',interestDelta:0.5,scale:0.1,originSessionId:sessionId,occurredAt:entry.occurredAt});
         entry.stateEffect=result.duplicate?'duplicate':'applied';
       }catch{entry.stateEffect='unavailable-or-denied';}
       this.save();

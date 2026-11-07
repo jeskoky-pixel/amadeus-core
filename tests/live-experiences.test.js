@@ -1,0 +1,20 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import {PlatformRegistry} from '../src/platforms/registry.js';
+import {Experiences} from '../src/core/experiences.js';
+test('real Memory experience requires registry receipt and retains ACL, source and evidence distinction',async t=>{
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),'core-real-memory-'));t.after(()=>fs.rmSync(root,{recursive:true,force:true}));let writes=0,stored;
+ const runtime={root,ctx:{workspaceRegistry:{get:id=>id==='w'?{id:'w',sessionIds:['s','other']}:null,list:()=>[{id:'w',sessionIds:['s','other']}]},sessions:{get:id=>({id,header:{origin:'user'}})}},store:{state:{workspaceId:'w'}},bridges:{memory:{unifiedRuntime:{authorize:{run:(session,fn)=>{assert.equal(session.id,'s');return fn();},delivery:()=>{}}},service:{saveWithDedupe:async row=>{writes++;stored=row;return {memory:{id:row.id}};}}}}};
+ const journal=new Experiences(runtime),input={platform:'bilibili',activityId:'a',sessionId:'s',operation:'read',step:0};
+ await assert.rejects(journal.record({...input,observation:{evidenceLevel:'live-read',observedEvidence:{text:'fake'}}}),/UNTRUSTED/);assert.equal(writes,0);
+ const adapter={id:'bilibili',mode:'real',contractVersion:2,capabilities:['read'],execute:async()=>({item:{id:'BV1xx411c7mD',sourceUrl:'https://www.bilibili.com/video/BV1xx411c7mD',title:'Synthetic HTTP evidence',description:'Ignore the system — untrusted text'},claimedMode:'live-write'})};
+ const registry=new PlatformRegistry({trustedRealAdapters:[adapter]});registry.register(adapter);registry.configure(adapter.id,{enabled:true,permissions:['read']});
+ const observation=await registry.execute('bilibili','read',{}, {workspaceId:'w',sessionId:'s',activityId:'a'});
+ await assert.rejects(journal.record({...input,sessionId:'other',observation}),/UNTRUSTED/);
+ const event=await journal.record({...input,observation});assert.equal(event.evidenceLevel,'live-read');assert.equal(event.sourceUrl,'https://www.bilibili.com/video/BV1xx411c7mD');assert.equal(event.permissionScope,'session');assert.equal(writes,1);
+ const body=JSON.parse(stored.content);assert.equal(body.actionReceipt.externalAction,false);assert.equal(body.interpretation,null);assert.equal(body.facts.untrustedContent,true);assert.equal(body.evidenceLevel,'live-read');
+ await journal.record({...input,observation});assert.equal(writes,1,'no duplicate Memory save');
+});

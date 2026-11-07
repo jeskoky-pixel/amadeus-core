@@ -1,0 +1,30 @@
+import test from 'node:test';import assert from 'node:assert/strict';import fs from 'node:fs';import os from 'node:os';import path from 'node:path';import {BrowserVault,protectWindows} from '../src/platforms/browser-vault.js';import {AccountManager} from '../src/platforms/accounts.js';
+const codec=async(b,decrypt)=>Buffer.from(b).map(x=>x^0xaa);
+test('vault separates Workspaces, does not contain plaintext, rejects stale save after forget',async t=>{const root=fs.mkdtempSync(path.join(os.tmpdir(),'core-vault-'));t.after(()=>fs.rmSync(root,{recursive:true,force:true}));let ws='one';const v=new BrowserVault({root,workspaceId:()=>ws,codec});await v.save({password:'synthetic-password'},'login');assert.equal(fs.readFileSync(v.file('login'),'utf8').includes('synthetic-password'),false);assert.equal((await v.read('login')).password,'synthetic-password');ws='two';assert.equal(await v.read('login'),null);ws='one';let release;v.codec=()=>new Promise(r=>release=r);const pending=v.save({cookies:[]});v.clear();release(Buffer.from('encoded'));await assert.rejects(pending,/REVOKED/);assert.equal(v.has(),false);});
+test('account restore requires same Workspace/account and does not restore explicit logout',async t=>{const root=fs.mkdtempSync(path.join(os.tmpdir(),'core-account-restore-'));t.after(()=>fs.rmSync(root,{recursive:true,force:true}));const file=path.join(root,'accounts.json');fs.writeFileSync(file,JSON.stringify({schema:1,accounts:[{platformId:'xhs',workspaceId:'w',accountId:'a',status:'authenticated',expiresAt:0}]}));let calls=0;const manager=new AccountManager({file,workspaceId:()=> 'w'});manager.register({id:'xhs',restoreLogin:async()=>{calls++;return {identity:{accountId:'a'},credentials:{sessionHandle:'private'},expiresAt:Date.now()+10000};}});await manager.restore();assert.equal(manager.context('xhs').accountId,'a');assert.equal(JSON.stringify(manager.status('xhs')).includes('private'),false);manager.logout('xhs');await manager.restore();assert.equal(calls,1);assert.equal(manager.context('xhs'),null);});
+test('Windows DPAPI round trip encrypts synthetic login data',{skip:process.platform!=='win32'},async()=>{const plain=Buffer.from('synthetic-password-not-a-user-secret');const encrypted=await protectWindows(plain);assert.notEqual(encrypted.toString(),plain.toString());assert.deepEqual(await protectWindows(encrypted,true),plain);});
+
+
+test('login checks share pending state without duplicate provider calls or false remote rate errors',async t=>{
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),'core-poll-'));t.after(()=>fs.rmSync(root,{recursive:true,force:true}));let now=1000,calls=0,release;
+ const m=new AccountManager({file:path.join(root,'a.json'),workspaceId:()=> 'w',now:()=>now});m.register({id:'x',beginLogin:async()=>({private:{},public:{method:'dedicated-browser',verificationUrl:'https://example.com',expiresAt:999999}}),pollLogin:async()=>{calls++;return new Promise(r=>release=r);}});
+ const initial=await m.begin('x'),id=initial.pending.loginId;const first=m.poll('x',id);assert.equal((await m.poll('x',id)).pending.loginId,id);assert.equal(calls,1);release({pending:true});await first;
+ assert.equal((await m.poll('x',id)).pending.loginId,id);assert.equal(calls,1);now+=3000;const next=m.poll('x',id);assert.equal(calls,2);release({pending:true});await next;
+});
+test('lost login is cleared while a late old failure cannot clear a newer login',async t=>{
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),'core-lost-'));t.after(()=>fs.rmSync(root,{recursive:true,force:true}));let delayed=false,rejectOld;
+ const m=new AccountManager({file:path.join(root,'a.json'),workspaceId:()=> 'w'});m.register({id:'x',beginLogin:async()=>({private:{},public:{method:'dedicated-browser',verificationUrl:'https://example.com',expiresAt:Date.now()+60000}}),pollLogin:async()=>{if(delayed)return new Promise((_,reject)=>rejectOld=reject);throw Error('CORE_PLATFORM_LOGIN_MISSING');}});
+ const first=await m.begin('x');await assert.rejects(m.poll('x',first.pending.loginId),/LOGIN_MISSING/);assert.equal(m.status('x').pending,null);
+ delayed=true;const old=await m.begin('x'),flight=m.poll('x',old.pending.loginId);const latest=await m.begin('x');rejectOld(Error('CORE_PLATFORM_LOGIN_MISSING'));await assert.rejects(flight,/LOGIN_MISSING/);assert.equal(m.status('x').pending.loginId,latest.pending.loginId);
+});
+
+
+test('Host confirms login without UI polling and stops its watcher on dispose',async t=>{
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),'core-host-login-'));t.after(()=>fs.rmSync(root,{recursive:true,force:true}));let loggedIn=false,calls=0;
+ const file=path.join(root,'accounts.json'),m=new AccountManager({file,workspaceId:()=> 'w'});t.after(()=>m.dispose());
+ m.register({id:'x',beginLogin:async()=>({private:{},public:{method:'dedicated-browser',verificationUrl:'https://example.com',expiresAt:Date.now()+60000}}),pollLogin:async()=>{calls++;return loggedIn?{identity:{accountId:'synthetic'},credentials:{private:'not-returned'},expiresAt:Date.now()+60000}:{pending:true};}});
+ await m.begin('x');loggedIn=true;m.start({intervalMs:10});
+ const deadline=Date.now()+2000;while(!m.context('x')&&Date.now()<deadline)await new Promise(r=>setTimeout(r,20));
+ assert.equal(m.context('x').accountId,'synthetic');assert.equal(m.status('x').pending,null);assert.equal(JSON.parse(fs.readFileSync(file)).accounts[0].status,'authenticated');assert.ok(!fs.readFileSync(file,'utf8').includes('not-returned'));
+ m.dispose();const before=calls;await new Promise(r=>setTimeout(r,40));assert.equal(calls,before);assert.equal(m.status('x').managedByHost,false);
+});
