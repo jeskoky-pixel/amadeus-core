@@ -27,6 +27,21 @@ function revision(deps) {
   ])).digest('hex');
 }
 
+// Display only. The Workspace ID remains the sole authorization/save key; this
+// helper reads a human-readable title from the trusted Registry and degrades to
+// null. A malformed or absent Registry never fabricates a title.
+export function workspaceDisplayTitle(ctx, workspaceId) {
+  try {
+    const registry = ctx?.reflect?.get?.('workspaceRegistry') ?? ctx?.workspaceRegistry;
+    const title = registry?.get?.(workspaceId)?.title;
+    if (typeof title !== 'string') return null;
+    const clean = title.replace(/[\u0000-\u001f\u007f]/g, ' ').trim().slice(0, 200);
+    return clean || null;
+  } catch {
+    return null;
+  }
+}
+
 export async function unifiedDisplay(ctx, snapshot) {
   // Display projection only: titles never contribute to authorization.
   try {
@@ -60,7 +75,7 @@ export function unifiedSnapshot(deps) {
       incoming: source ? db.prepare("SELECT source_key FROM unified_long_term_grants WHERE workspace_id=? AND reader_key=?").all(deps.activeWorkspaceId,source).map(r=>r.source_key) : [] };
   });
   return { enabled: Boolean(runtime), configured: (deps.settings.getFeatureFlags().unifiedSessionAclEnabled ?? deps.config?.unifiedSessionAclEnabled) === true,
-    workspace_id: deps.activeWorkspaceId, sessions, revision: revision(deps),
+    workspace_id: deps.activeWorkspaceId, workspace_title: workspaceDisplayTitle(deps.ctx, deps.activeWorkspaceId), sessions, revision: revision(deps),
     limitations: ['允许学习会永久保留合法取得的学习成果；撤权停止新的源记忆读取，不自动删除已学知识。只读共享的派生知识继续受来源授权约束。', '历史来源无法验证的会话拒绝访问；可创建新会话。', '全局别名、稳定 ID 和合并管理只对管理员开放。', '连续性文件救援与自动工作流提议暂不在统一 ACL 模式运行。', '后台任务只处理仍有可信会话的来源，不继承读取共享。', '模型写入后的全库 Markdown 镜像延后至管理员同步或重启恢复，避免来源视图覆盖完整镜像。'],
     migration: { quarantined_histories: runtime ? db.prepare('SELECT COUNT(*) n FROM unified_learning_migration').get().n : 0, legacy_count: db.prepare("SELECT COUNT(*) AS n FROM memories WHERE scene_scope IS NULL").get().n,
       legacy_preview: db.prepare("SELECT id,title FROM memories WHERE scene_scope IS NULL ORDER BY id LIMIT 20").all(),

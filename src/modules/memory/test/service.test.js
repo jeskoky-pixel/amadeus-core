@@ -120,6 +120,26 @@ test("mutations through passthroughs sync mirror; forgotten entries stay out of 
   }
 });
 
+test("service.remove reports existence, protection and real deletion honestly", () => {
+  const store = createStore(":memory:");
+  let writes = 0;
+  const service = createService({ store, mirror: null, config: {}, onWrite: () => { writes++; } });
+  const saved = service.saveWithDedupe({ type: "project", title: "删除契约", content: "可删除正文", importance: 3 });
+  const id = saved.memory.id;
+  const before = writes;
+  assert.equal(service.remove("missing-id"), false, "missing is not reported as deleted");
+  assert.equal(writes, before, "a missing delete does not notify writes");
+  store.setProtected(id, true, { by: "test" });
+  assert.equal(service.remove(id), false, "store false (protected) must surface as false");
+  assert.equal(store.getById(id).protected, true, "protected row remains");
+  assert.equal(writes, before, "a refused protected delete does not notify writes or mirror");
+  store.setProtected(id, false, { by: "test" });
+  assert.equal(service.remove(id), true, "store undefined success must be reported as true");
+  assert.equal(store.getById(id), undefined, "successful delete actually removes the row");
+  assert.ok(writes > before, "successful delete notifies once");
+  store.close();
+});
+
 test("saveWithDedupe created branch keeps forgotten entries out of mirror", () => {
   const store = createStore(":memory:");
   const dir = mkdtempSync(join(tmpdir(), "dsh-mneme-service-"));

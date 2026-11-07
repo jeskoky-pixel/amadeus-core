@@ -178,3 +178,28 @@ test('plugin exports the expected Cordis contract and absolute storage default',
   assert.throws(() => normalizeConfig({ maxHistory: 5 }), /maxHistory/);
   assert.deepEqual(normalizeConfig({}), { dataDirectory: undefined, maxHistory: 50 });
 });
+
+test('explicit Owner probe resolves the current Host Agent shape through optional Session Controller', async () => {
+  const directory = await makeTempDir();
+  try {
+    const store = makeStore(directory, { now: fixedClock() });
+    await seedState(store, { workspaceId: 'ws-a', core: 'CORE PERSONA' });
+    const { ctx, sections } = makeCtx(makeRegistry([{ id: 'ws-a', sessionIds: ['s-main'] }]));
+    const live = { session: { id: 's-main', header: { id: 's-main', agentPreset: 'standard' } } };
+    Object.defineProperty(ctx, 'agents', { get() { throw new Error('service not injected'); } });
+    let wrong = false, assemblies = 0;
+    ctx.reflect = { get: key => key === 'sessionController' ? {
+      resolveAgent: async () => ({ agent: wrong ? { session: { id: 'different' } } : live }),
+    } : undefined };
+    ctx.systemPrompt.assemble = async ({ agent }) => { assemblies++; return assemble(sections, agent, []); };
+    let service;
+    apply(ctx, { dataDirectory: directory, __coreBridge: value => { service = value.service; } });
+    const result = await service.probeFinalVisibility('s-main');
+    assert.equal(result.status, 'visible');
+    assert.equal(result.coreVisible, true);
+    assert.equal(assemblies, 1);
+    wrong = true;
+    assert.equal((await service.probeFinalVisibility('s-main')).reason, 'agent_not_live');
+    assert.equal(assemblies, 1, 'mismatched Agent must never be assembled');
+  } finally { await removeTempDir(directory); }
+});

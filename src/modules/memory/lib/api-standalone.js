@@ -443,11 +443,15 @@ export function createStandaloneApi({ service, store, config = {}, logger, setti
         }
         if (req.method === "DELETE") {
           // store.remove deletes silently — precheck for a distinguishable 404.
-          if (!service.getById(id)) {
+          const existing = service.getById(id);
+          if (!existing) {
             sendJson(res, 404, { error: "not-found" });
             return;
           }
-          service.remove(id);
+          if (service.remove(id) !== true) {
+            sendJson(res, 409, { error: existing.protected === true ? "protected-memory" : "not-deleted" });
+            return;
+          }
           sendJson(res, 200, { ok: true });
           return;
         }

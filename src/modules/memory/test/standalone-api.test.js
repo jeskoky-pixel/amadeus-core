@@ -207,6 +207,31 @@ test("POST/GET/DELETE /memories round trip", async () => {
   }
 });
 
+test("standalone DELETE refuses protected memory with 409 and keeps it", async () => {
+  const { base, auth, close, service, store } = await setup();
+  try {
+    const post = await fetch(`${base}/memories`, {
+      method: "POST",
+      headers: { ...auth, "content-type": "application/json" },
+      body: JSON.stringify({ type: "history", title: "受保护的外部删除", content: "受保护正文不能谎报删除" })
+    });
+    assert.equal(post.status, 201);
+    const created = await post.json();
+    store.setProtected(created.id, true, { by: "test" });
+    const refused = await fetch(`${base}/memories/${created.id}`, { method: "DELETE", headers: auth });
+    assert.equal(refused.status, 409);
+    assert.deepEqual(await refused.json(), { error: "protected-memory" });
+    assert.equal(service.getById(created.id).protected, true);
+    store.setProtected(created.id, false, { by: "test" });
+    const removed = await fetch(`${base}/memories/${created.id}`, { method: "DELETE", headers: auth });
+    assert.equal(removed.status, 200);
+    assert.deepEqual(await removed.json(), { ok: true });
+    assert.equal(service.getById(created.id), undefined);
+  } finally {
+    close();
+  }
+});
+
 test("POST /memories dedupes same title within a type (200 + merged content)", async () => {
   const { base, auth, close } = await setup();
   try {

@@ -22,7 +22,7 @@ export const apply = async (ctx, config = {}) => {
     output:{schema:{type:'object',additionalProperties:true},render:(_args,value)=>[{type:'text',text:JSON.stringify(value)}]}});
   ctx.systemPrompt.section({name:'amadeus:activity-guidance',interpolate:false,order:190,
     text:assemble=>canExplore(runtime,assemble?.agent?.session?.id)
-      ? 'This is the persistent Amadeus Activity Session. Life provides wake opportunities; use your current State, Persona and authorized Memory to decide whether to explore. You may do nothing. Only use currently enabled platform capabilities and explicit grants. Simulation is not real observation; live reads prove only returned text/metadata. Use amadeus_explore_read for reads; amadeus_platform_interact permits scoped XHS actions only when the Owner grants that operation, note and Session. Never retry or paraphrase an unknown or already-recorded action. finish naturally with amadeus_explore_finish. Do not treat simulated evidence as real observations or send it externally. Never run merely to fill a quota.' : ''});
+      ? 'This is the persistent Amadeus Activity Session. Life provides wake opportunities; use your current State, Persona and authorized Memory to decide whether to explore. You may do nothing. Only use currently enabled platform capabilities and explicit grants. Simulation is not real observation; live reads prove only returned text/metadata. Use amadeus_explore_read for reads; amadeus_platform_interact permits supported platform actions on content you have actually browsed under Owner platform-level operation grants. No per-note approval or manual Session selection is required. Browse or search first; choose whether to read, like, comment or reply based on your interests and Persona. Never retry or paraphrase an unknown or already-recorded action. finish naturally with amadeus_explore_finish. Do not treat simulated evidence as real observations or send it externally. Never run merely to fill a quota.' : ''});
   ctx.tools.register({
     name:'amadeus_experience_read',
     description:'Read one recorded Amadeus experience by eventId, subject to current Session memory permissions. Simulation evidence is not a real platform action.',
@@ -37,3 +37,4 @@ export const apply = async (ctx, config = {}) => {
   mountCoreHttp(ctx, runtime);
   await runtime.start();
 };
+

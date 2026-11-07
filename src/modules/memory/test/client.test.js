@@ -703,7 +703,7 @@ test("graph jump lands on the selected memory in the browser", () => {
     "the edge source button must jump to the origin memory by id"
   );
   assert.ok(
-    /const jumpToMemory = \(target\) => \{/.test(clientSource),
+    /const jumpToMemory = (?:async )?\(target\) => \{/.test(clientSource),
     "jumpToMemory must reset filters and select the target"
   );
 });
@@ -2654,6 +2654,83 @@ test("navigation persistence stores only validated top/subtab selection in sessi
   storage.set("amadeus-memory.nav.v1", "{not-json");
   assert.deepEqual(plain(sandbox.readAmadeusNav()), { panelTab: "memory", memoryView: "long-term", settingsPage: "general" });
   assert.ok(!snippet.includes("localStorage"), "navigation must use session storage only");
+});
+
+test("entity directory empty state distinguishes switch, restart, pending, failure, auth and network", () => {
+  let loaded;
+  const fakeReact = {
+    Fragment: Symbol("Fragment"),
+    createElement(type) { return { type }; },
+    useState(value) { return [value, () => {}]; },
+    useRef(value) { return { current: value }; },
+    useEffect() {},
+    useCallback(fn) { return fn; },
+    useMemo(fn) { return fn(); }
+  };
+  const sandbox = {
+    __DSH_MNEME_TEST__: true,
+    window: { __ModuleLoader__: { load(spec) { loaded = spec; } } },
+    document: {
+      hidden: false,
+      addEventListener() {},
+      removeEventListener() {},
+      querySelector() { return null; },
+      createElement() { return { dataset: {}, style: {}, textContent: "" }; },
+      head: { appendChild() {} }
+    },
+    navigator: { language: "zh-CN" },
+    console,
+    setTimeout,
+    clearTimeout,
+    setInterval,
+    clearInterval,
+    URL,
+    fetch: async () => ({ ok: false, status: 503, json: async () => ({}) })
+  };
+  vm.runInNewContext(clientSource, sandbox, { filename: join(root, "lib/client.js") });
+  const module = loaded.factory(() => fakeReact);
+  const state = module.__test.entityDirectoryState;
+  assert.equal(typeof state, "function", "the empty-state decision must be testable");
+  const at = (input) => state({ count: 0, loading: false, query: "", error: null, status: null, ...input });
+
+  assert.equal(at({ loading: true }), "loading");
+  assert.equal(at({ count: 1 }), null, "a non-empty directory has no empty state");
+  assert.equal(at({ query: "missing" }), "noMatch");
+  assert.equal(at({ status: null }), "none", "legacy server without status keeps the old copy");
+  assert.equal(at({ status: { enabled: false, installed: false } }), "disabled");
+  assert.equal(at({ status: { enabled: false, runtimeEnabled: true, installed: true } }), "restartOff");
+  assert.equal(at({ status: { enabled: false, installed: true } }), "restartOff");
+  assert.equal(at({ status: { enabled: true, runtimeEnabled: false, installed: false } }), "restart");
+  assert.equal(at({ status: { enabled: true, installed: false } }), "restart");
+  assert.equal(at({ status: { enabled: true, installed: true, pending: 2 } }), "pending");
+  assert.equal(at({ status: { enabled: true, installed: true, pending: 0, last: { ok: false, code: "parse_failed" } } }), "failedParse");
+  assert.equal(at({ status: { enabled: true, installed: true, pending: 0, last: { ok: false, code: "llm_failed" } } }), "failed");
+  assert.equal(at({ status: { enabled: true, installed: true, pending: 0, last: { ok: true } } }), "empty");
+  assert.equal(at({ error: { kind: "http", status: 401 } }), "forbidden");
+  assert.equal(at({ error: { kind: "http", status: 403 } }), "forbidden");
+  assert.equal(at({ error: { kind: "http", status: 500 } }), "error");
+  assert.equal(at({ error: { kind: "network" } }), "network");
+
+  for (const key of [
+    "memory.entities.restart", "memory.entities.restartOff", "memory.entities.pending", "memory.entities.emptyEnabled",
+    "memory.entities.failed", "memory.entities.failedParse", "memory.entities.forbidden",
+    "memory.entities.network", "memory.entities.httpError", "memory.entities.refresh"
+  ]) {
+    const occurrences = clientSource.split(`"${key}"`).length - 1;
+    assert.ok(occurrences >= 2, `i18n key ${key} must exist in both zh and en (got ${occurrences})`);
+  }
+  assert.ok(clientSource.includes("entityDirectoryState({"), "the rail must use the shared state decision");
+});
+
+test("unified ACL card shows the trusted workspace title while keeping the ID for authorization", () => {
+  assert.ok(clientSource.includes('const workspaceLabel = state?.workspace_title || state?.workspace_id'),
+    "the card must prefer the display title and fall back to the ID");
+  assert.ok(clientSource.includes("title:state.workspace_id || undefined"),
+    "the immutable workspace ID must stay reachable as a tooltip");
+  assert.ok(clientSource.includes('`工作区：${workspaceLabel}'),
+    "the main row must render the display label, not the raw UUID");
+  assert.ok(clientSource.includes('JSON.stringify({session_id:source,owner_read:owner,readers'),
+    "authorization/save must keep using the session source, not the display title");
 });
 
 test("Scene switch resets graph selection and search while stale responses remain guarded", () => {

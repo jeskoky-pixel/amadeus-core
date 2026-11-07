@@ -19,9 +19,12 @@ test('two stdio and one HTTP discover same tool names without collisions, enforc
  await m.remove('one',m.store.state.revision);assert.equal(m.overview().servers.length,2);
 });
 test('MCP restart restores configuration and quota, credentials redact, timeout does not retry',async t=>{
- const {m,runtime}=fixture(t);await m.save(config('one'),0);const token='synthetic-"secret-token';m.store.secret(token);
+ // Keep the 200ms RPC deadline, but do not also require a cold Windows Node
+ // process to start inside it. Real stdio loss/reconnect is covered below.
+ const {m,runtime}=fixture(t),cfg={...config('one'),transport:'streamable-http',url:await local(t)};delete cfg.command;delete cfg.args;
+ await m.save(cfg,0);const token='synthetic-"secret-token';m.store.secret(token);
  const v=await m.call('one','echo',{text:token},exec());assert.equal(v.result.content[0].text,'[redacted]');
- await pause();await m.save({...config('one'),timeoutMs:200},m.store.state.revision);
+ await pause();await m.save({...cfg,timeoutMs:200},m.store.state.revision);
  assert.equal(m.overview().servers[0].status,'connected');await assert.rejects(m.call('one','slow',{text:'late'},exec()),/TIMEOUT|CALL_FAILED/);
  assert.equal(m.overview().servers[0].used,2);assert.equal(m.events.length,2);
  await m.dispose();const restored=new McpManager(runtime);t.after(()=>restored.dispose());await restored.start();assert.equal(restored.overview().servers[0].used,2);assert.equal(restored.events.length,2);assert.equal(restored.overview().servers[0].status,'connected');

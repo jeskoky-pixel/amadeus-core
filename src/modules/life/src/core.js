@@ -1727,6 +1727,92 @@ export class LifeCore {
   }
 
   /**
+   * Conservatively close one wake as `failed` after a complete, action-free
+   * failed/cancelled turn consumed it. This trusted Host-only transition is not
+   * exposed as a model tool. It never marks execution, never rewrites or
+   * deletes consumption/source audit, and never redelivers the wake. The
+   * persisted turn-end evidence must already exist with exactly matching
+   * coordinates and a failed/cancelled reason.
+   * @param {string} id - wake id.
+   * @param {{targetSessionId: string, messageId: string, turnSeq: number, turnEndSeq: number, reason: string}} coordinates - trusted turn evidence.
+   * @returns {Record<string, unknown>} failed wake view.
+   */
+  markWakeFailedWithoutExternalAction(id, { targetSessionId, messageId, turnSeq, turnEndSeq, reason } = {}) {
+    this.#ensureOpen()
+    this.#assertWritable()
+    const wakeId = requireString(id, 'id', 200)
+    const target = requireString(targetSessionId, 'targetSessionId', 200)
+    const message = requireString(messageId, 'messageId', 200)
+    const turn = assertInteger(turnSeq, 'turnSeq', { min: 1 })
+    const endSeq = assertInteger(turnEndSeq, 'turnEndSeq', { min: 1 })
+    const why = requireString(reason, 'reason', 100)
+    if (why !== 'error' && why !== 'cancelled') {
+      throw new LifeValidationError('reason must be a failed or cancelled turn end', { reason: why })
+    }
+    return this.store.writeTransaction(() => {
+      const wake = this.store.get('SELECT * FROM wake_requests WHERE id = ?', wakeId)
+      if (wake === undefined) throw new LifeNotFoundError(`wake "${wakeId}" was not found`, { wakeId })
+      if (wake.target_session_id !== target) {
+        throw new LifeUnauthorizedError('wake target session does not match failure evidence', { wakeId })
+      }
+      if (wake.message_id !== message && wake.prepared_message_id !== message) {
+        throw new LifeValidationError('message id does not match the prepared/admitted wake', { wakeId })
+      }
+      const evidence = this.store.get(
+        'SELECT * FROM wake_consumption WHERE wake_id = ? AND message_id = ?',
+        wakeId,
+        message,
+      )
+      if (evidence === undefined) {
+        throw new LifeValidationError('failure requires prior consumption evidence', { wakeId })
+      }
+      if (evidence.target_session_id !== target) {
+        throw new LifeUnauthorizedError('consumption evidence session mismatch', { wakeId })
+      }
+      if (Number(evidence.turn_seq) !== turn) {
+        throw new LifeRevisionConflictError('failure turn does not match consumed turn', {
+          wakeId,
+          consumedTurn: evidence.turn_seq,
+          turnSeq: turn,
+        })
+      }
+      if (evidence.turn_end_seq === null || evidence.turn_end_seq === undefined) {
+        throw new LifeValidationError('failure requires recorded turn-end evidence', { wakeId })
+      }
+      if (Number(evidence.turn_end_seq) !== endSeq || evidence.turn_reason !== why) {
+        throw new LifeRevisionConflictError('conflicting turn-end evidence', {
+          wakeId,
+          expectedTurnEndSeq: evidence.turn_end_seq,
+          turnEndSeq: endSeq,
+        })
+      }
+      if (String(wake.status) === 'failed') return this.#wakeView(wakeId)
+      if (!['claimed', 'admitted', 'uncertain'].includes(String(wake.status))) {
+        throw new LifeInvalidTransitionError(`wake in status "${String(wake.status)}" cannot be failed`, {
+          wakeId,
+          status: wake.status,
+        })
+      }
+      const now = this.iso()
+      const previousError =
+        typeof wake.last_error === 'string' && wake.last_error.length > 0
+          ? wake.last_error
+          : `turn ended: ${why}`
+      const result = this.store.run(
+        `UPDATE wake_requests SET status = 'failed', last_error = ?, updated_at = ?
+         WHERE id = ? AND status IN ('claimed', 'admitted', 'uncertain')`,
+        `${previousError}; no external action`,
+        now,
+        wakeId,
+      )
+      if (Number(result.changes) !== 1) {
+        throw new LifeInvalidTransitionError('wake status changed during failure update', { wakeId })
+      }
+      return this.#wakeView(wakeId)
+    })
+  }
+
+  /**
    * Read trusted consumption evidence for one wake, if any. This is a trusted
    * service read only; it is never exposed as a model tool.
    * @param {string} id - wake id.

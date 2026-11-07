@@ -316,3 +316,13 @@ export function previewText(preview, lang) {
   }
   return `单个事件后的预计变化：心情 ${signed(before.mood)} → ${signed(after.mood)}，精力 ${before.energy} → ${after.energy}，好奇 ${before.curiosity} → ${after.curiosity}。预览不会写入数据库。`;
 }
+
+// Labels never authorize: option values remain the original trusted Session ID.
+export function sessionChoices(sessions = [], selected = [], lang = 'zh') {
+  const rows = new Map();
+  for (const s of sessions) if (s?.member === true && s.mode !== 'disabled' && typeof s.sessionId === 'string') {
+    rows.set(s.sessionId, { id:s.sessionId, title:typeof s.title === 'string' ? s.title.trim() : '', unavailable:false });
+  }
+  for (const id of selected) if (typeof id === 'string' && id && !rows.has(id)) rows.set(id,{id,title:'',unavailable:true});
+  return [...rows.values()].map(s=>({...s,label:(s.unavailable ? (lang==='zh'?'已保存但当前不可用':'Saved but unavailable') : s.title || (lang==='zh'?'未命名会话':'Untitled session'))+' · '+s.id.slice(-8)}));
+}

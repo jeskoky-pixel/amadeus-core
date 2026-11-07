@@ -1,4 +1,4 @@
-# Amadeus Core 0.2.0-alpha.5
+# Amadeus Core 0.2.0-alpha.6
 
 开发候选，尚未发布。一个 DSH Bundle 内保留 Memory 1.3.0、Life 1.2.1、State 1.2.0、Persona 1.2.0 的实现与数据结构；QQ 继续独立。
 
@@ -12,11 +12,13 @@
 
 ## 开发与隔离安装
 
-使用官方 DSH 0.2.1-rc.3 运行时验证。执行 `npm run build`、`npm test`、`npm run test:modules`、`npm run pack:check`。`npm pack --ignore-scripts` 生成含预构建客户端的本地候选包，再通过独立 DSH Profile 的插件管理器安装。不要在已有四插件启用的日常 Profile 直接安装本候选。
+本轮目标为官方 DSH 0.2.2-rc.1，保留较早版本的历史验收记录。执行 `npm run build`、`npm test`、`npm run test:modules`、`npm run pack:check`。`npm pack --ignore-scripts` 生成含预构建客户端的本地候选包，再通过 DSH 插件管理器安装。不要在已有四插件启用的 Profile 同时启用本候选。升级前按迁移文档备份完整 Home、Profile 与业务数据；不同 Profile 的 pnpm 包可能共享硬链接，更新前须卸载仍占用同一执行文件的相关模块。
 
 首次打开 Amadeus Core → 设置 → 选择 DSH Workspace → 保存并应用。模块的数据位于独立 Core 数据根，升级代码不会清空它。迁移前阅读 [DATA_MIGRATION.md](DATA_MIGRATION.md)；禁用旧模块不是删除旧数据。
 
 ## 当前边界
+
+以下旧段落描述早期 alpha.2/alpha.5 起点；当前 alpha.6 的账号持久化、原生小红书后端及真实操作证据以 [本轮验证记录](docs/verification/alpha6/FULL_CYCLE_2026-11-06.md) 和下列日期明确的专项报告为准。功能实现、历史成功、本轮回读和自然活动分别验收；本候选仍未正式发布。
 
 Bilibili 已实现网页端扫码客户端和元数据/热门/搜索/评论/相关内容请求；公开视频详情已做一次无账号只读验证。网页接口不是开放平台 OAuth，仍需用户本人登录联调，不保证所有账号/接口持续可用。小红书使用官方 Web 设备授权，需要审核通过的应用；当前官方仅开放 basic_info，笔记搜索/评论/发布不支持。两平台真实写操作均关闭。
 

@@ -119,6 +119,86 @@ function attachHistory(controller, events) {
   return controller
 }
 
+const HISTORY_MESSAGE_TYPES = new Set(['user/message', 'assistant/message'])
+
+/**
+ * Mirror the installed Session Controller `page()`/`paginate()` contract:
+ * `maxMessages` counts append-surface messages, `turnWindow` stops at a Turn
+ * start once both minima are met, and `beforeSeq` is an exclusive upper bound.
+ * This reproduces the real SDK behavior where `minTurns: 1` yields one Turn per
+ * page even when `maxMessages` is much larger.
+ */
+function attachPaginatedHistory(controller, events) {
+  const requests = []
+  const asOfSeq = events.reduce((max, event) => Math.max(max, Number(event.seq) || 0), 0)
+  controller.projections = async () => ({ kind: 'sequenced', asOfSeq, values: {} })
+  controller.page = async (request) => {
+    requests.push({ ...request })
+    const end = Math.min(request.throughSeq + 1, request.beforeSeq ?? request.throughSeq + 1)
+    let count = 0
+    let turns = 0
+    let cut = 0
+    for (let index = end - 1; index >= 0; index -= 1) {
+      const event = events[index]
+      if (request.turnWindow !== undefined && event.type === 'turn/start') {
+        turns += 1
+        if (count >= request.turnWindow.minMessages && turns >= request.turnWindow.minTurns) {
+          cut = index
+          break
+        }
+      }
+      if (!HISTORY_MESSAGE_TYPES.has(event.type)) continue
+      count += 1
+      if (count >= request.maxMessages) {
+        cut = index
+        break
+      }
+    }
+    return {
+      records: events.slice(cut, end).map((event) => ({ type: 'event', event })),
+      hasMore: cut > 0,
+    }
+  }
+  controller.requests = requests
+  return controller
+}
+
+/** Create one admitted wake in a disposable Host, ready for a restart test. */
+async function admittedWakeInRestartableDb({ extraDue = false } = {}) {
+  const clock = makeClock()
+  const databasePath = join(tempDir(), 'life.sqlite')
+  const first = fakeHost()
+  apply(first.ctx, {
+    databasePath, clock: clock.now, tickIntervalMs: 0,
+    wakeDelivery: { enabled: true, allowedSessionIds: [SESSION_A], intervalMs: 60_000 },
+  })
+  const life1 = first.provided.get('life')
+  const firstIntent = seedDue(life1, clock)
+  await life1.driveDueWakesOnce()
+  const message = first.agents.get(SESSION_A).followups[0]
+  const wake = life1.listWakes().find((item) => item.intentId === firstIntent.id)
+  let secondIntent
+  if (extraDue) secondIntent = seedDue(life1, clock)
+  return { clock, databasePath, first, life1, firstIntent, secondIntent, message, wake }
+}
+
+/** Restart onto the same database with the SDK-shaped history API. */
+function restartWithPaginatedHistory(databasePath, clock, events) {
+  const second = fakeHost()
+  second.ctx.get = () => undefined
+  second.ctx.inject = (_names, callback) => callback({
+    sessionController: second.ctx.sessionController,
+    sessions: second.ctx.sessions,
+    on: second.ctx.on.bind(second.ctx),
+  })
+  const controller = attachPaginatedHistory(second.ctx.sessionController, events)
+  apply(second.ctx, {
+    databasePath, clock: clock.now, tickIntervalMs: 0,
+    wakeDelivery: { enabled: true, allowedSessionIds: [SESSION_A], intervalMs: 60_000 },
+  })
+  return { second, controller, life: second.provided.get('life') }
+}
+
 function setup({ delivery, flush, resolveAgent, without } = {}) {
   const dir = tempDir()
   const clock = makeClock()
@@ -1308,4 +1388,192 @@ test('H17 withdrawing Host services during resolve prevents a late followup', as
   assert.equal(life.getHealth().delivery.state, 'degraded')
   assert.equal(life.listWakes({ status: 'executed' }).length, 0)
   host.disposers.forEach((dispose) => dispose())
+})
+
+function makeEventBuilder() {
+  const events = []
+  let seq = -1
+  const add = (type, data) => {
+    events.push({ type, seq: ++seq, data })
+    return events[events.length - 1]
+  }
+  return { events, add }
+}
+
+test('H30 reconciliation pages by SDK message windows and reaches an older wake turn', async () => {
+  const { clock, databasePath, first, message, wake } = await admittedWakeInRestartableDb()
+  first.disposers.forEach((dispose) => dispose())
+
+  const { events, add } = makeEventBuilder()
+  for (let turn = 1; turn <= 18; turn += 1) {
+    add('turn/start', { turn })
+    add('user/message', { id: `user-${turn}`, role: 'user', content: [], source: { kind: 'user' } })
+    add('assistant/message', { turn })
+    add('turn/end', { turn, reason: { kind: 'completed' } })
+  }
+  add('turn/start', { turn: 19 })
+  add('user/message', { id: message.id, role: 'user', content: message.content, source: message.source })
+  add('assistant/attempt', { turn: 19 })
+  add('turn/end', { turn: 19, reason: { kind: 'completed' } })
+  for (let turn = 20; turn <= 34; turn += 1) {
+    add('turn/start', { turn })
+    add('user/message', { id: `user-${turn}`, role: 'user', content: [], source: { kind: 'user' } })
+    add('assistant/message', { turn })
+    add('turn/end', { turn, reason: { kind: 'completed' } })
+  }
+
+  const { second, controller, life } = restartWithPaginatedHistory(databasePath, clock, events)
+  await life.driveDueWakesOnce()
+
+  assert.equal(life.getWake(wake.id).status, 'executed')
+  assert.equal(life.getHealth().delivery.reconciliation, 'done')
+  assert.ok(controller.requests.length >= 1)
+  // The SDK stops at a Turn start when turnWindow is present; one Turn per page
+  // would miss the older wake after four pages.
+  assert.deepEqual(controller.requests.filter((request) => request.turnWindow !== undefined), [])
+  second.disposers.forEach((dispose) => dispose())
+})
+
+test('H31 an action-free failed turn finalizes the old wake as failed and unblocks a later wake', async () => {
+  const { clock, databasePath, first, life1, secondIntent, message, wake } = await admittedWakeInRestartableDb({ extraDue: true })
+
+  const { events, add } = makeEventBuilder()
+  add('turn/start', { turn: 2 })
+  add('user/message', { id: message.id, role: 'user', content: message.content, source: message.source })
+  add('assistant/message', {
+    turn: 2,
+    message: { content: [{ type: 'text', text: 'partial answer' }, { type: 'reasoning', text: 'private note' }] },
+  })
+  add('assistant/attempt', { turn: 2, stream: [{ type: 'chunk', chunk: { type: 'finish', reason: { kind: 'error' } } }] })
+  add('turn/end', { turn: 2, reason: { kind: 'error' } })
+  for (const event of events) first.emitSession(SESSION_A, event)
+
+  assert.equal(life1.getWake(wake.id).status, 'uncertain')
+  const before = life1.getWakeConsumption(wake.id)
+  assert.equal(before.turnReason, 'error')
+  assert.equal(before.turnEndSeq, 4)
+  first.disposers.forEach((dispose) => dispose())
+
+  const { second, life } = restartWithPaginatedHistory(databasePath, clock, events)
+  await life.driveDueWakesOnce()
+
+  const failed = life.getWake(wake.id)
+  assert.equal(failed.status, 'failed')
+  assert.equal(failed.executedAt, null)
+  assert.match(failed.lastError, /no external action/)
+  const consumption = life.getWakeConsumption(wake.id)
+  assert.equal(consumption.turnReason, 'error')
+  assert.equal(consumption.turnEndSeq, 4)
+
+  const nextWake = life.listWakes().find((item) => item.intentId === secondIntent.id)
+  assert.equal(nextWake.status, 'admitted')
+  assert.equal(second.agents.get(SESSION_A).followups.length, 1)
+  second.disposers.forEach((dispose) => dispose())
+})
+
+test('H32 failed-turn proof never closes a wake on tool activity, missing boundaries, or ambiguity', async () => {
+  const variants = ['tool-call', 'assistant-tool-call-block', 'attempt-tool-call', 'attempt-missing-stream', 'attempt-invalid-stream', 'extra-user', 'unknown-context', 'inserted-inbox', 'missing-start', 'missing-end', 'unknown-reason']
+  for (const variant of variants) {
+    const { clock, databasePath, first, message, wake } = await admittedWakeInRestartableDb()
+    first.disposers.forEach((dispose) => dispose())
+
+    const { events, add } = makeEventBuilder()
+    if (variant !== 'missing-start') add('turn/start', { turn: 2 })
+    if (variant === 'inserted-inbox') add('agent/inbox/spliced', { target: 'next-turn', start: 0, removedCount: 1, inserted: [{ role: 'user', content: [] }] })
+    add('user/message', { id: message.id, role: 'user', content: message.content, source: message.source })
+    if (variant === 'tool-call') add('tool/call', { turn: 2, name: 'qq_send_message' })
+    if (variant === 'assistant-tool-call-block') {
+      add('assistant/message', {
+        turn: 2,
+        message: { content: [{ type: 'tool-call', id: 'call-1', name: 'qq_send_message' }] },
+      })
+    }
+    if (variant === 'extra-user') {
+      add('user/message', { id: 'other-user-message', role: 'user', content: [], source: { kind: 'user' } })
+    }
+    if (variant === 'unknown-context') add('user/message', { id: 'unknown', content: [], source: { kind: 'unrecognized-context' } })
+    if (variant === 'attempt-tool-call') add('assistant/attempt', { turn: 2, stream: [{ type: 'chunk', chunk: { type: 'block-start', blockType: 'tool-call' } }] })
+    add('assistant/attempt', { turn: 2, ...(variant === 'attempt-missing-stream' ? {} : {
+      stream: variant === 'attempt-invalid-stream' ? {} : [{ type: 'chunk', chunk: { type: 'finish', reason: { kind: 'error' } } }],
+    }) })
+    if (variant !== 'missing-end') {
+      add('turn/end', { turn: 2, reason: { kind: variant === 'unknown-reason' ? 'unknown' : 'error' } })
+    }
+
+    const { second, controller, life } = restartWithPaginatedHistory(databasePath, clock, events)
+    await life.driveDueWakesOnce()
+    const status = life.getWake(wake.id).status
+    assert.ok(['admitted', 'uncertain'].includes(status), `${variant}: ${status} ${controller.requests.length}`)
+    if (!['missing-start', 'missing-end'].includes(variant)) {
+      assert.equal(status, 'uncertain', variant)
+    }
+    assert.equal(life.getWake(wake.id).executedAt, null, variant)
+    assert.equal(second.agents.get(SESSION_A)?.followups.length ?? 0, 0, variant)
+    second.disposers.forEach((dispose) => dispose())
+  }
+})
+
+test('H33 failed-turn closure rejects conflicting coordinates and upgrades idempotently', async () => {
+  const { databasePath, first, life1, message, wake } = await admittedWakeInRestartableDb()
+  const { events, add } = makeEventBuilder()
+  add('turn/start', { turn: 2 })
+  add('user/message', { id: message.id, role: 'user', content: message.content, source: message.source })
+  add('assistant/attempt', { turn: 2 })
+  add('turn/end', { turn: 2, reason: { kind: 'error' } })
+  for (const event of events) first.emitSession(SESSION_A, event)
+  assert.equal(life1.getWake(wake.id).status, 'uncertain')
+  first.disposers.forEach((dispose) => dispose())
+
+  const core = new LifeCore({ databasePath })
+  try {
+    const coordinates = { targetSessionId: SESSION_A, messageId: message.id, turnSeq: 2, turnEndSeq: 3, reason: 'error' }
+    assert.throws(
+      () => core.markWakeFailedWithoutExternalAction(wake.id, { ...coordinates, turnEndSeq: 9 }),
+      /conflicting turn-end evidence/,
+    )
+    assert.throws(
+      () => core.markWakeFailedWithoutExternalAction(wake.id, { ...coordinates, turnSeq: 3 }),
+      /failure turn does not match/,
+    )
+    assert.throws(
+      () => core.markWakeFailedWithoutExternalAction(wake.id, { ...coordinates, reason: 'completed' }),
+      /failed or cancelled turn/,
+    )
+    const failed = core.markWakeFailedWithoutExternalAction(wake.id, coordinates)
+    assert.equal(failed.status, 'failed')
+    assert.equal(failed.executedAt, null)
+    assert.match(failed.lastError, /no external action/)
+    const again = core.markWakeFailedWithoutExternalAction(wake.id, coordinates)
+    assert.equal(again.status, 'failed')
+    const consumption = core.getWakeConsumption(wake.id)
+    assert.equal(consumption.turnReason, 'error')
+    assert.equal(consumption.turnEndSeq, 3)
+  } finally {
+    core.close()
+  }
+})
+
+test('H34 official Host inert context and consumed inbox removal do not block conclusive failed-wake recovery', async () => {
+  const { clock, databasePath, first, message, wake } = await admittedWakeInRestartableDb()
+  first.disposers.forEach((dispose) => dispose())
+  const { events, add } = makeEventBuilder()
+  add('turn/start', { turn: 2 })
+  add('agent/inbox/spliced', { target: 'next-turn', start: 0, removedCount: 1, inserted: [] })
+  add('step/start', { turn: 2, step: 1 })
+  add('user/message', { id: message.id, content: message.content, source: message.source })
+  for (const kind of ['runtime-context', 'time-context', 'skill-catalog']) {
+    add('user/message', { id: kind, content: [{ type: 'text', text: 'synthetic Host context' }], source: { kind } })
+  }
+  add('assistant/attempt', { turn: 2, stream: [
+    { type: 'chunk', chunk: { type: 'usage', usage: { inputTokens: 0, outputTokens: 0 } } },
+    { type: 'chunk', chunk: { type: 'finish', reason: { kind: 'error' } } },
+  ] })
+  add('step/end', { turn: 2, step: 1 })
+  add('turn/end', { turn: 2, reason: { kind: 'error' } })
+  const { second, life } = restartWithPaginatedHistory(databasePath, clock, events)
+  await life.driveDueWakesOnce()
+  assert.equal(life.getWake(wake.id).status, 'failed')
+  assert.equal(life.getWake(wake.id).executedAt, null)
+  assert.equal(second.agents.get(SESSION_A)?.followups.length ?? 0, 0)
+  second.disposers.forEach((dispose) => dispose())
 })

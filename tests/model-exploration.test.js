@@ -115,3 +115,11 @@ test('social model tool shares Life activity and refuses read-tool write escalat
  const result=await observe(runtime,'activity',args,{social:true});assert.equal(result.observation.evidenceLevel,'live-action');assert.deepEqual(counts(),{starts:1,records:1});
  await assert.rejects(observe(runtime,'activity',args,{social:true}),/ALREADY_RECORDED/);assert.deepEqual(counts(),{starts:1,records:1});
 });
+
+test('capability discovery exposes grants only to activity session and future platform appears in interact schema',async t=>{
+ const {runtime}=fixture(t);const adapter={id:'future-platform',contractVersion:2,mode:'real',socialWrites:true,capabilities:['like'],normalizeSocialInput:(_op,input)=>input,execute:async()=>({})};runtime.platforms=new PlatformRegistry({trustedRealAdapters:[adapter]});runtime.platforms.register(adapter);
+ const tools=new Map();const {registerExplorationTools}=await import('../src/core/model-exploration.js');registerExplorationTools({tools:{register:t=>tools.set(t.name,t)}},runtime);
+ assert.ok(tools.get('amadeus_platform_interact').parameters.properties.platform.enum.includes('future-platform'));
+ const discovery=tools.get('amadeus_platform_capabilities');assert.throws(()=>discovery.execute({}, {agent:{session:{id:'other'}}}),/ACTIVITY_SESSION_REQUIRED/);
+ const result=discovery.execute({}, {agent:{session:{id:'activity'}}});assert.equal(result.contractVersion,1);assert.equal(result.platforms[0].enabled,false);assert.deepEqual(result.platforms[0].permissions,[]);assert.ok(!JSON.stringify(result).includes('cookie'));
+});
