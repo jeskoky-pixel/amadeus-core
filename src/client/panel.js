@@ -399,6 +399,21 @@ function matchPersonaTheme(frame,theme,fontFamily){
   if(!style){style=doc.createElement('link');style.id='core-persona-embed-theme';style.rel='stylesheet';style.href='/api/amadeus-core/persona-embed.css';doc.head.appendChild(style)}
  }catch{}
 }
+function renderModuleTab({tab,status,views,lifeSummary,t,h}){
+ const empty=h('div',{className:'core-empty'},t('请先选择工作区并应用配置，或启用此模块。','Choose a workspace and apply configuration, or enable this module.'));
+ if(!status?.modules?.[tab]?.mounted)return empty;
+ if(tab==='memory'||tab==='state')return views[tab]?.()??empty;
+ const summary=lifeSummary&&h('section',{className:'core-card'},
+  h('div',{className:'core-card-head'},h('h2',null,t('当前生活概况','Current life summary')),h('span',{className:'core-badge core-badge--plain'},t('派生视图','Derived view'))),
+  h('p',{className:'core-card-sub'},t('概况由 Life、State 和经历记录生成，不创建新的记忆或调度。','Derived from Life, State and Experiences; it creates no memory or scheduler.')),
+  lifeSummary.errors?.length?h('div',{className:'core-alert',role:'status'},t(`部分数据不可用：${lifeSummary.errors.join('；')}`,`Some data is unavailable: ${lifeSummary.errors.join('; ')}`)):null,
+  h('div',{className:'core-module-grid'},
+   h('div',{className:'core-module'},h('strong',null,t('下一次复查','Next review')),h('span',null,lifeSummary.life.nextReviewAt||t('暂无','None'))),
+   h('div',{className:'core-module'},h('strong',null,t('当前运行活动','Running activity')),h('span',null,lifeSummary.life.currentActivity?.description||t('无','None'))),
+   h('div',{className:'core-module'},h('strong',null,t('最近已保存经历','Latest stored experience')),h('span',null,lifeSummary.recentExperience?.summary||t('暂无','None'))),
+   h('div',{className:'core-module'},h('strong',null,t('兴趣','Interests')),h('span',null,lifeSummary.state.interests.map(i=>i.name).filter(Boolean).join('、')||t('暂无','None')))));
+ return h('div',null,views.life?.(),summary);
+}
 function CorePanel({ctx,views,formsService,onClose}){
  const [tab,setTab]=useState('overview'),[status,setStatus]=useState(null),[error,setError]=useState(''),[workspace,setWorkspace]=useState(''),[busy,setBusy]=useState(false),[english,setEnglish]=useState(false);
  const [sources,setSources]=useState({memory:'',life:'',state:'',persona:''}),[offlineConfirmed,setOfflineConfirmed]=useState(false);
@@ -412,7 +427,7 @@ function CorePanel({ctx,views,formsService,onClose}){
  const moduleLabel=name=>t(...(CORE_MODULE_LABELS[name]??[name,name]));
  const importLabel=name=>t(...(CORE_IMPORT_LABELS[name]??[name,name]));
  const modules=Object.entries(status?.modules??{}),enabledModules=modules.filter(([,value])=>value.enabled).length,mountedModules=modules.filter(([,value])=>value.mounted).length;
- const realPlatforms=status?.platforms??[],simulations=status?.simulations??[],experiences=status?.experiences??[],mcpServers=status?.mcp?.servers??[];
+ const realPlatforms=status?.platforms??[],simulations=status?.simulations??[],experiences=status?.experiences??[],mcpServers=status?.mcp?.servers??[],lifeSummary=status?.lifeSummary??null;
  const workspaceInfo=(status?.workspaces??[]).find(item=>item.id===status?.workspaceId),workspaceName=workspaceInfo?.title||status?.workspaceId||t('未绑定','Unbound');
  const phase=status?.activity?.phase??'Idle',phaseLabel=phase==='Idle'?t('空闲','Idle'):phase==='Exploring'?t('探索中','Exploring'):phase==='Deliberating'?t('思考中','Deliberating'):phase==='Paused'?t('已暂停','Paused'):phase==='Completed'?t('已完成','Completed'):phase;
  const statusTone=value=>['ready','ok'].includes(String(value).toLowerCase())?'ok':['blocked','error','failed'].includes(String(value).toLowerCase())?'danger':['restarting','loading','paused'].includes(String(value).toLowerCase())?'warn':'plain';
@@ -432,7 +447,7 @@ function CorePanel({ctx,views,formsService,onClose}){
  ];
  let content;
  if(tab==='mcp')content=h(McpPanel,{state:status?.mcp,sessions:status?.sessions??[],refresh,t});
- else if(['memory','state','life'].includes(tab))content=status?.modules?.[tab]?.mounted?views[tab]?.():h('div',{className:'core-empty'},t('请先选择工作区并应用配置，或启用此模块。','Choose a workspace and apply configuration, or enable this module.'));
+ else if(['memory','state','life'].includes(tab))content=renderModuleTab({tab,status,views,lifeSummary,t,h});
  else if(tab==='persona')content=status?.modules?.persona?.mounted?h('div',{className:'core-persona-host'},h('iframe',{ref:personaFrame,title:'Amadeus Persona',src:'/api/amadeus-persona/console',className:'core-persona-frame',onLoad:()=>matchPersonaTheme(personaFrame.current,theme,getComputedStyle(shellRef.current||personaFrame.current).fontFamily)})):h('div',{className:'core-empty'},t('请启用人格模块。','Enable the Persona module.'));
  else if(tab==='platforms')content=h(PlatformPanel,{status,refresh,t});
  else if(tab==='experiences')content=h('div',{className:'core-settings'},h('section',{className:'core-card'},h('h2',null,t('经历时间线','Experience timeline')),h('p',{className:'core-card-sub'},t('按来源区分模拟与真实读取；标题和文本不代表看过完整视频。','Evidence distinguishes simulation and live reads; metadata is not full video understanding.')),(status?.experiences??[]).length?status.experiences.map(e=>h('article',{key:e.eventId,className:'core-module',style:{display:'block',margin:'10px 0'}},h('strong',null,e.platform),h('p',{style:{margin:'3px 0'}},`${e.occurredAt} · ${e.status}`),h('code',null,e.eventId))):h('p',{className:'core-note'},t('暂无经历记录。','No experiences yet.'))));
@@ -446,6 +461,12 @@ function CorePanel({ctx,views,formsService,onClose}){
    h('div',{className:'core-actions core-actions--start'},
     h('button',{type:'button',className:'core-btn',disabled:busy||status?.status!=='ready',onClick:()=>action(()=>api('/simulate',{}))},t('运行两个模拟平台的只读验收','Run two simulated read-only platforms')),
     h('button',{type:'button',className:'core-btn',disabled:busy||status?.status!=='ready',onClick:()=>action(()=>api('/prepare-exploration',{}))},t('准备持久活动会话','Prepare persistent Activity Session'))),
+   h('div',{className:'core-module-grid'},
+    h('div',{className:'core-module'},h('strong',null,t('Life 唤醒','Life wake')),h('span',{className:'core-badge core-badge--'+(status?.lifeDelivery?.state==='active'?'ok':status?.lifeDelivery?.state==='degraded'?'warn':'plain')},status?.lifeDelivery?.state??t('不可用','Unavailable'))),
+    h('div',{className:'core-module'},h('strong',null,t('唤醒会话','Wake sessions')),h('span',null,status?.lifeDelivery?.allowedSessions??0)),
+    h('div',{className:'core-module'},h('strong',null,t('外发提示','External-message opt-in')),h('span',null,t('由 Life/QQ 单独授权','Separate Life/QQ opt-in')))),
+   h('div',{className:'core-actions'},
+    h('button',{type:'button',className:'core-btn',disabled:busy||status?.status!=='ready'||!status?.modules?.life?.mounted||!status?.activity?.sessionId,onClick:()=>action(()=>api('/prepare-autonomous-life',{}))},t('绑定活动会话并启用 Life 唤醒','Bind Activity Session and enable Life wake'))),
    h('label',{className:'core-switch'},h('input',{type:'checkbox',checked:status?.explorationEnabled===true,disabled:busy,onChange:e=>action(()=>api('/configure',{revision:status.revision,explorationEnabled:e.target.checked}))}),h('span',null,t('允许活动会话自主使用已授权平台能力（默认关闭）','Allow Activity Session to use authorized platform capabilities (off by default)'))),
    h('div',{className:'core-fields'},
     h('label',{className:'core-field'},h('span',{className:'core-field-label'},t('单次活动总时限','Activity wall-clock limit')),h('input',{type:'number',min:10,max:300,className:'core-input',key:status?.activityBudgetMs,defaultValue:(status?.activityBudgetMs??120000)/1000,onBlur:e=>{const value=Number(e.target.value)*1000;if(value!==status.activityBudgetMs)action(()=>api('/configure',{revision:status.revision,activityBudgetMs:value}));}}),h('small',{className:'core-field-hint'},t('秒，包含模型思考；下次活动生效。','Seconds, including model thinking; next activity.'))),
@@ -454,7 +475,7 @@ function CorePanel({ctx,views,formsService,onClose}){
    h('div',{className:'core-actions'},
     h('button',{type:'button',className:'core-btn',disabled:busy||status?.activity?.phase!=='Paused',onClick:()=>action(()=>api('/activity',{action:'resume'}))},t('在原预算内恢复活动','Resume within original budget')),
     h('button',{type:'button',className:'core-btn',disabled:busy||status?.activity?.phase==='Idle',onClick:()=>action(()=>api('/activity',{action:'finish'}))},t('安全结束当前活动','Safely finish current activity'))),
-   h('p',{className:'core-note'},t('仅在上面的持久活动会话中生效。可以通过 Life 配置唤醒机会，或在 DSH 中打开该会话交谈；不会自动创建第二套调度。真实平台需要单独开启权限，失败不会切换为模拟内容。','Only the persistent Activity Session may use these tools. Configure wake opportunities in Life or open this Session in DSH. Core adds no second scheduler. Live platforms require separate permissions; errors never fall back to mock content.'))),
+   h('p',{className:'core-note'},t('按钮只会把当前活动会话加入 Life allowlist 并启用已有 Host 唤醒；保存后需应用待重启配置。外发提示仍默认关闭，QQ 发送还需目标 Scene 自己的授权。不会创建第二套调度。','This action only adds the Activity Session to Life\'s allowlist and enables the existing Host wake; apply the pending restart afterward. External-message guidance stays off, and QQ sending still requires target Scene authorization. No second scheduler is created.'))),
   h('section',{className:'core-card'},
    h('div',{className:'core-card-head'},h('div',null,h('h2',null,t('模块','Modules')),h('p',{className:'core-card-sub'},t('Life 配置保存后需应用；State 配置保存后实时生效。应用时拒绝中断活动模型回合。','Apply Life changes; State changes take effect live. Applying refuses to interrupt active model turns.')))),
    h('div',{className:'core-fields'},...modules.map(([name,value])=>h('label',{key:name,className:'core-switch'},h('input',{type:'checkbox',checked:value.enabled,disabled:busy,onChange:e=>action(()=>api('/configure',{revision:status.revision,module:name,enabled:e.target.checked}))}),h('span',{className:'core-field-label'},moduleLabel(name),h('code',null,name)),h('span',{className:'core-badge core-badge--'+(value.mounted?'ok':value.enabled?'warn':'plain')},value.mounted?t('运行中','running'):value.enabled?t('未挂载','inactive'):t('已停用','disabled')))))),
@@ -468,7 +489,7 @@ function CorePanel({ctx,views,formsService,onClose}){
     status?.canRollback?h('button',{type:'button',className:'core-btn',disabled:busy,onClick:()=>action(()=>api('/rollback',{revision:status.revision}))},t('恢复前一个数据代（不删除数据）','Restore previous data generation (keep all data)')):null)));
  else content=h('div',{className:'core-overview'},
   h('section',{className:'core-hero'},
-   h('div',null,h('span',{className:'core-eyebrow'},'AMADEUS CORE'),h('h2',null,t('一个身份，持续的记忆、状态与生活。','One identity, continuous memory, state and life.')),h('p',null,t('在同一个工作区里，管理人格、记忆、状态与跨平台生活。','Manage identity, memory, state and cross-platform life in one workspace.')),h('div',{className:'core-badges'},h('span',{className:'core-badge core-badge--'+statusTone(status?.status??'loading')},status?.status??t('加载中','loading')),h('span',{className:'core-badge core-badge--accent'},`v${status?.version??'0.2.0-alpha.5'}`),h('span',{className:'core-badge'},status?.workspaceId?t('工作区已绑定','Workspace bound'):t('尚未绑定工作区','No workspace')))),
+   h('div',null,h('span',{className:'core-eyebrow'},'AMADEUS CORE'),h('h2',null,t('一个身份，持续的记忆、状态与生活。','One identity, continuous memory, state and life.')),h('p',null,t('在同一个工作区里，管理人格、记忆、状态与跨平台生活。','Manage identity, memory, state and cross-platform life in one workspace.')),h('div',{className:'core-badges'},h('span',{className:'core-badge core-badge--'+statusTone(status?.status??'loading')},status?.status??t('加载中','loading')),h('span',{className:'core-badge core-badge--accent'},`v${status?.version??'0.2.0-alpha.6'}`),h('span',{className:'core-badge'},status?.workspaceId?t('工作区已绑定','Workspace bound'):t('尚未绑定工作区','No workspace')))),
    h('dl',{className:'core-facts'},...facts.map(([label,value])=>h('div',{className:'core-fact',key:label},h('dt',null,label),h('dd',null,value))))),
   h('div',{className:'core-stat-grid'},...stats.map(stat=>h('article',{className:'core-stat',key:stat.label},h('div',{className:'core-stat-label'},h('span',null,stat.label),h('span',{className:'core-stat-dot','aria-hidden':'true'})),h('div',{className:'core-stat-value'+(stat.text?' core-stat-value--text':'')},stat.value),h('div',{className:'core-stat-sub'},stat.sub)))),
   h('section',{className:'core-card'},h('div',{className:'core-card-head'},h('h3',null,t('模块状态','Module status')),h('span',{className:'core-badge core-badge--'+(mountedModules===modules.length&&modules.length?'ok':'plain')},`${mountedModules} / ${modules.length} ${t('运行中','running')}`)),modules.length?h('div',{className:'core-module-grid'},...modules.map(([name,value])=>h('div',{className:'core-module',key:name},h('div',{className:'core-module-name'},h('strong',null,moduleLabel(name)),h('code',null,name)),h('span',{className:'core-badge core-badge--'+(value.mounted?'ok':value.enabled?'warn':'plain')},value.mounted?t('运行中','running'):value.enabled?t('未挂载','inactive'):t('已停用','disabled'))))):h('p',{className:'core-note'},t('状态加载中。','Loading status.'))),
@@ -501,3 +522,4 @@ return {inject:['slots','locale','configForms'],apply(ctx){
  ctx.slots.inject('settings.section',()=>ctx.slots.register({name:'settings.section',id:'amadeus-core',order:23,label:()=> 'Amadeus Core'},()=>h(CorePanel,{ctx,views,formsService:configForms})));
  ctx.slots.inject('sidebar.footer.action',()=>ctx.slots.register({name:'sidebar.footer.action',id:'amadeus-core',order:5,label:()=> 'Amadeus Core'},()=>h(CoreLauncher,{ctx,views,formsService:configForms})));
 }};
+

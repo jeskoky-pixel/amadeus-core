@@ -18,6 +18,26 @@ export const SNAPSHOT_SCAN_LIMIT = 2000
 const HISTORY_PAGE_MESSAGES = 200
 const HISTORY_MAX_PAGES = 4
 const EVIDENCE_EVENT_LIMIT = 800
+/** Turn-end reasons that can conservatively close an action-free failed wake. */
+const FAILED_TURN_REASONS = new Set(['error', 'cancelled'])
+/**
+ * Session events that carry no tool, command, subagent, approval, or background
+ * execution. Any other event inside the turn makes the "no external action"
+ * proof unavailable and the wake stays conservative.
+ */
+const NON_ACTION_TURN_EVENTS = new Set([
+  'assistant/attempt',
+  'assistant/message',
+  'developer/message',
+  'system/message',
+  'step/start',
+  'step/end',
+  'llm/retry',
+  'llm/retry-started',
+  'request/context',
+  'request/header',
+  'model/selection',
+])
 
 /**
  * Short reference-only prompt for the model. Deliberately excludes the intent
@@ -625,7 +645,10 @@ export class WakeHost {
     } catch {
       // Idle bookkeeping must never break event observation.
     }
-    if (event.type === 'user/message' && event.data?.source?.kind !== WAKE_SOURCE_KIND) {
+    // Only actual human input preempts an activity. Host runtime-context,
+    // time-context and skill-catalog messages are model-step metadata.
+    const inputKind = event.data?.source?.kind
+    if (event.type === 'user/message' && (inputKind === undefined || inputKind === 'user')) {
       // Real user turn wins over same-Session long activities. The Provider is
       // paused/checkpointed when supported; otherwise the activity stays
       // conservative unknown. Never cancel or resend.
@@ -867,6 +890,135 @@ export class WakeHost {
   }
 
   /**
+   * Whether an assistant/message carries only inert content blocks. A tool call
+   * or any other non-text/reasoning block makes the action-free proof invalid,
+   * even when the Host log did not emit a matching tool/call event.
+   * @param {unknown} data - assistant/message event data.
+   * @returns {boolean} true only for absent content or text/reasoning blocks.
+   */
+  #assistantMessageBlocksAreInert(data) {
+    for (const content of [data?.message?.content, data?.content]) {
+      if (content === undefined) continue
+      if (!Array.isArray(content)) return false
+      for (const block of content) {
+        if (block === null || typeof block !== 'object') return false
+        if (block.type !== 'text' && block.type !== 'reasoning') return false
+      }
+    }
+    return true
+  }
+
+  /**
+   * Prove that one exact wake message was consumed by a complete, gap-free,
+   * failed/cancelled turn with no tool, command, subagent, approval, or other
+   * action event. Anything ambiguous returns null so the wake stays
+   * unreconciled rather than being closed by guesswork.
+   * @param {unknown[]} events - bounded durable Session history.
+   * @param {string} wakeId - ledger wake id.
+   * @param {string} messageId - persistent message id.
+   * @returns {{turn: number, userSeq: number, endSeq: number, reason: string} | null} proof.
+   */
+  #scanFailedTurnForWake(events, wakeId, messageId) {
+    const window = events.length > SNAPSHOT_SCAN_LIMIT ? events.slice(-SNAPSHOT_SCAN_LIMIT) : events
+    const matches = []
+    for (let index = 0; index < window.length; index += 1) {
+      const event = window[index]
+      if (event?.type !== 'user/message') continue
+      const data = event.data
+      if (
+        data?.id === messageId &&
+        data?.source?.kind === WAKE_SOURCE_KIND &&
+        data.source.wakeId === wakeId
+      ) {
+        matches.push(index)
+      }
+    }
+    if (matches.length !== 1) return null
+    const matchIndex = matches[0]
+    let startIndex = -1
+    for (let index = matchIndex; index >= 0; index -= 1) {
+      if (window[index]?.type === 'turn/start') {
+        startIndex = index
+        break
+      }
+    }
+    if (startIndex < 0) return null
+    const turn = Number(window[startIndex].data?.turn)
+    if (!Number.isInteger(turn)) return null
+    let endIndex = -1
+    for (let index = matchIndex + 1; index < window.length; index += 1) {
+      const event = window[index]
+      if (event?.type === 'turn/start') return null
+      if (event?.type === 'turn/end') {
+        if (Number(event.data?.turn) !== turn) return null
+        endIndex = index
+        break
+      }
+    }
+    if (endIndex < 0) return null
+    const reason = window[endIndex].data?.reason?.kind
+    if (!FAILED_TURN_REASONS.has(reason)) return null
+    const startSeq = Number(window[startIndex].seq)
+    const userSeq = Number(window[matchIndex].seq)
+    const endSeq = Number(window[endIndex].seq)
+    if (![startSeq, userSeq, endSeq].every(Number.isInteger)) return null
+    if (!(startSeq < userSeq && userSeq < endSeq)) return null
+    // Dense seq = no page gap, truncation, or duplicated event inside the turn.
+    for (let index = startIndex + 1; index <= endIndex; index += 1) {
+      const previous = Number(window[index - 1].seq)
+      const current = Number(window[index].seq)
+      if (!Number.isInteger(current) || current !== previous + 1) return null
+    }
+    let wakeMessages = 0
+    for (let index = startIndex; index <= endIndex; index += 1) {
+      const event = window[index]
+      if (event?.type === 'turn/start') {
+        if (index !== startIndex) return null
+        continue
+      }
+      if (event?.type === 'turn/end') {
+        if (index !== endIndex) return null
+        continue
+      }
+      if (event?.type === 'user/message') {
+        if (index === matchIndex) {
+          wakeMessages += 1
+        } else {
+          // The official Host persists inert runtime/time/catalog snapshots as
+          // user/message too. They are not a second human/wake message. Only
+          // these trusted source kinds and inert text blocks are admitted.
+          if (!['runtime-context', 'time-context', 'skill-catalog'].includes(event.data?.source?.kind)) return null
+          if (!this.#assistantMessageBlocksAreInert(event.data)) return null
+        }
+        continue
+      }
+      if (event?.type === 'agent/inbox/spliced') {
+        // A consumed next-turn inbox item is removed immediately after start.
+        // Never accept inserted/steered work or a splice after consumption.
+        const splice = event.data
+        if (index >= matchIndex || splice?.target !== 'next-turn' || splice.start !== 0 ||
+          splice.removedCount !== 1 || !Array.isArray(splice.inserted) || splice.inserted.length !== 0) return null
+        continue
+      }
+      if (event?.type === 'assistant/attempt') {
+        // A partial model stream may contain a tool call even when no separate
+        // tool/call event was persisted. Only inert failed-attempt metadata is
+        // conclusive here; unknown stream shapes remain unresolved.
+        if (!Array.isArray(event.data?.stream)) return null
+        for (const record of event.data.stream) {
+          if (record?.type !== 'chunk' || !['usage', 'finish'].includes(record.chunk?.type)) return null
+          if (record.chunk.type === 'finish' && record.chunk.reason?.kind !== 'error') return null
+        }
+      }
+      if (event?.data?.turn !== undefined && Number(event.data.turn) !== turn) return null
+      if (event?.type === 'assistant/message' && !this.#assistantMessageBlocksAreInert(event.data)) return null
+      if (!NON_ACTION_TURN_EVENTS.has(event?.type)) return null
+    }
+    if (wakeMessages !== 1) return null
+    return { turn, userSeq, endSeq, reason }
+  }
+
+  /**
    * Read bounded durable Session history through the official Host history API:
    * `projections()` supplies the exact `asOfSeq`, `page()` supplies chronological
    * `{type:'event', event}` records. No cold Agent resolution and no invented
@@ -899,7 +1051,11 @@ export class WakeHost {
         address: { kind: 'session', sessionId },
         throughSeq,
         maxMessages: HISTORY_PAGE_MESSAGES,
-        turnWindow: { minMessages: 1, minTurns: 1 },
+        // Do not send turnWindow here. The Host stops at the first Turn start
+        // after both minima, which caps a page at one Turn even when
+        // maxMessages is larger. Message-aligned paging bounded by maxMessages
+        // and the exclusive beforeSeq cursor covers the same history without
+        // scanning the whole log.
       }
       if (beforeSeq !== undefined) request.beforeSeq = beforeSeq
       let response
@@ -922,6 +1078,7 @@ export class WakeHost {
       }
       const firstSeq = pageEvents.length > 0 ? Number(pageEvents[0].seq) : NaN
       if (!Number.isInteger(firstSeq)) return { events, complete: false }
+      if (beforeSeq !== undefined && firstSeq >= beforeSeq) return { events, complete: false }
       beforeSeq = firstSeq
     }
     if (events.length > EVIDENCE_EVENT_LIMIT) {
@@ -958,6 +1115,7 @@ export class WakeHost {
     this.reconcileAbort = abort
     let examined = 0
     let executed = 0
+    let failed = 0
     let incomplete = false
     try {
       for (const sessionId of this.#targets()) {
@@ -982,6 +1140,16 @@ export class WakeHost {
           if (typeof messageId !== 'string') continue
           const found = this.#scanEventsForWake(history.events, wake.id, messageId)
           if (found === null) continue
+          const failedProof =
+            found.reason === 'completed'
+              ? null
+              : this.#scanFailedTurnForWake(history.events, wake.id, messageId)
+          const provenFailure =
+            failedProof !== null &&
+            failedProof.turn === found.turn &&
+            failedProof.userSeq === found.userSeq &&
+            failedProof.endSeq === found.endSeq &&
+            failedProof.reason === found.reason
           examined += 1
           try {
             this.core.recordWakeConsumedFromSnapshot(wake.id, {
@@ -997,7 +1165,18 @@ export class WakeHost {
               turnEndSeq: found.endSeq,
               reason: found.reason,
             })
-            if (found.reason === 'completed') executed += 1
+            if (found.reason === 'completed') {
+              executed += 1
+            } else if (provenFailure) {
+              this.core.markWakeFailedWithoutExternalAction(wake.id, {
+                targetSessionId: sessionId,
+                messageId,
+                turnSeq: found.turn,
+                turnEndSeq: found.endSeq,
+                reason: found.reason,
+              })
+              failed += 1
+            }
           } catch {
             // Keep unreconciled; never guess.
           }
@@ -1012,7 +1191,7 @@ export class WakeHost {
         this.reconcileBackoffMs = 30_000
         this.nextReconcileAt = this.clock() + this.intervalMs
       }
-      return { status: 'ok', examined, executed, incomplete }
+      return { status: 'ok', examined, executed, failed, incomplete }
     } catch (error) {
       this.reconcileState = 'degraded'
       this.lastReconcileError = messageOf(error)

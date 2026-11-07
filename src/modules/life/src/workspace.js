@@ -45,7 +45,7 @@ export class WorkspacePolicy {
    * @param {() => Record<string, any>} options.budgetConfig
    * @param {import('./core.js').LifeCore} options.core
    */
-  constructor({ store, v1, core, getRegistry, legacyAllowed, budgetConfig, logger } = {}) {
+  constructor({ store, v1, core, getRegistry, legacyAllowed, budgetConfig, logger, getSessionTitle } = {}) {
     this.store = store
     this.v1 = v1
     this.core = core
@@ -53,6 +53,7 @@ export class WorkspacePolicy {
     this.legacyAllowed = legacyAllowed
     this.budgetConfig = budgetConfig
     this.logger = logger
+    this.getSessionTitle = getSessionTitle
     this.lastError = null
     this.budgetSignature = null
   }
@@ -348,7 +349,7 @@ export class WorkspacePolicy {
     // New Workspace members inherit Life identity even while autonomous wake
     // remains disabled. A listing is also the first contact after cold start.
     this.#ensureBindings(entity)
-    return [...entity.sessionIds].filter((id) => !this.#archived().includes(id)).map((sessionId) => this.resolve(sessionId))
+    return [...entity.sessionIds].filter((id) => !this.#archived().includes(id)).map((sessionId) => { let title = ""; try { title = this.getSessionTitle?.(sessionId) ?? "" } catch {} return { ...this.resolve(sessionId), title: typeof title === "string" ? title.slice(0, 300) : "" } })
   }
 
   /** Reject a Life model tool for an outside/disabled member. */

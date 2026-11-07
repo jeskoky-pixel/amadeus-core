@@ -1,0 +1,7 @@
+{
+  "version": "v2.7.0-amadeus.1",
+  "sha256": "1335fee008a371bcdcb6ccc7187daea957e95a64610e4e6647198c3799360712",
+  "upstream": "d6352e5435b45ebb48fe240dc03a2bec0476bd56",
+  "storage": "windows-current-user-dpapi",
+  "browser": "signed-microsoft-edge-job-object"
+}

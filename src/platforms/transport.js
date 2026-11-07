@@ -16,7 +16,7 @@ export function createPlatformTransport({allowedOrigins,timeoutMs=10000,maxBytes
     const combined=signal?AbortSignal.any([signal,timeout]):timeout;
     try {
       const res=await fetch(u,{method,headers,body,signal:combined,redirect:'error'});
-      if(!res.ok) {await res.body?.cancel();throw new PlatformError(({401:'login_required',403:'permission_required',429:'rate_limited'})[res.status]??'network_error');}
+      if(!res.ok) {await res.body?.cancel();throw new PlatformError(({401:'login_required',403:'permission_required',412:'rate_limited',429:'rate_limited'})[res.status]??'network_error');}
       const reader=res.body?.getReader();let size=0,chunks=[];
       if(!reader)throw new PlatformError('invalid_response');
       try {while(true){const {done,value}=await reader.read();if(done)break;size+=value.byteLength;if(size>maxBytes)throw new PlatformError('response_limit');chunks.push(value);}}

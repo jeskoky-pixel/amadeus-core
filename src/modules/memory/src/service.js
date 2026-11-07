@@ -386,6 +386,37 @@ export function createService({ store, mirror, config, onWrite, logger, document
   // 写入批量决定。回滚时由 transaction() 截断到事务前的基线（见 ROLLBACK 路径）。
   const pendingEntity = [];
 
+  // Lightweight, user-visible extraction telemetry. This is deliberately not a
+  // job ledger: it holds only the last real extraction result (never the LLM
+  // stream's success audit, which is written before JSON parsing) and a count of
+  // queued/in-flight passes. No content, prompt, provider message or credential
+  // is retained here.
+  let entityExtractionInFlight = 0;
+  let entityExtractionLast = null;
+
+  function entityExtractionErrorCode(error) {
+    const text = String(error ?? "");
+    if (/Failed to parse JSON/i.test(text)) return "parse_failed";
+    if (/returned empty response/i.test(text)) return "empty_response";
+    if (/Invalid extraction/i.test(text)) return "invalid_extraction";
+    if (/Invalid memory/i.test(text)) return "invalid_memory";
+    if (/UNIFIED_|SCENE_|ACCESS_DENIED|DENIED/i.test(text)) return "denied";
+    if (/(llm|stream|provider|fetch|network|timeout|quota|rate.limit|\b(?:401|403|429|5\d\d)\b)/i.test(text)) return "llm_failed";
+    return "failed";
+  }
+
+  function recordEntityExtractionOutcome(result, at) {
+    const ok = result?.ok === true;
+    const last = { ok, code: ok ? "ok" : entityExtractionErrorCode(result?.error), at };
+    if (ok) {
+      if (Array.isArray(result.entities)) last.entities = result.entities.length;
+      if (Array.isArray(result.attrs)) last.attrs = result.attrs.length;
+      if (Array.isArray(result.relations)) last.relations = result.relations.length;
+      if (Number.isFinite(result.skipped)) last.skipped = result.skipped;
+    }
+    entityExtractionLast = last;
+  }
+
   // distill-tx-embed-gap：scheduleEmbed 在事务内曾被首行 `if (txDepth > 0) return;`
   // 直接丢弃（注释写 deferred，transaction() 从不补跑）——与 #372 的实体抽取是
   // 同一个 bug 模板，只是受害者换成了嵌入：自动蒸馏的 session:* 行因此 100%
@@ -399,14 +430,48 @@ export function createService({ store, mirror, config, onWrite, logger, document
       pendingEntity.push(memory);
       return;
     }
-    if (!config.entityExtractionEnabled || !entityExtractor) return;
-    try {
-      entityExtractor(memory).catch((err) => {
+    if (!config.entityExtractionEnabled || typeof entityExtractor !== "function") return;
+    entityExtractionInFlight++;
+    const complete = (result) => {
+      entityExtractionInFlight = Math.max(0, entityExtractionInFlight - 1);
+      try {
+        recordEntityExtractionOutcome(result, new Date().toISOString());
+      } catch {
+        // Telemetry must never break a write or leak a malformed hook result.
+        entityExtractionLast = { ok: false, code: "failed", at: new Date().toISOString() };
+      }
+    };
+    // A logger is host-provided and may itself throw. Logging is best-effort:
+    // settlement must run even when the logger fails, or pending would stay
+    // non-zero forever and the rejection would become unhandled.
+    const logFailure = (err) => {
+      try {
         logger?.warn?.("entity extraction failed:", err);
+      } catch { /* logging must never affect settlement */ }
+    };
+    try {
+      // The hook resolves to the extractor's own result ({ ok, entities, ... }),
+      // so parse/shape failures are recorded as failures even though the LLM
+      // stream itself may have completed successfully.
+      Promise.resolve(entityExtractor(memory)).then(complete, (err) => {
+        logFailure(err);
+        complete({ ok: false, error: String(err) });
       });
     } catch (err) {
-      logger?.warn?.("entity extraction failed:", err);
+      logFailure(err);
+      complete({ ok: false, error: String(err) });
     }
+  }
+
+  function getEntityExtractionStatus() {
+    const enabled = config?.entityExtractionEnabled === true;
+    const installed = typeof entityExtractor === "function";
+    return {
+      enabled,
+      installed,
+      pending: enabled && installed ? pendingEntity.length + entityExtractionInFlight : 0,
+      last: entityExtractionLast ? { ...entityExtractionLast } : null
+    };
   }
 
   /**
@@ -2856,6 +2921,12 @@ export function createService({ store, mirror, config, onWrite, logger, document
     const sync = afterSync("write");
     notifyWrite();
     scheduleEmbed(updated);
+    // A real content/title correction is a normal write for the entity face:
+    // use the same extraction queue as saveWithDedupe. Metadata-only patches
+    // (importance/tags/scope) and unchanged bodies must not spend an LLM pass.
+    if (old && updated && (old.content !== updated.content || old.title !== updated.title)) {
+      scheduleEntityExtraction(updated);
+    }
     // Audit peer B: when the mirror sync failed, the store write landed but
     // the mirror did not converge — return an explicit degraded receipt rather
     // than a plain success. Non-enumerable so existing deepEqual assertions on
@@ -3018,6 +3089,8 @@ export function createService({ store, mirror, config, onWrite, logger, document
       }
     },
     setEntityExtractor(fn) { entityExtractor = fn; },
+    /** Safe, content-free entity extraction state for the owner entity page. */
+    getEntityExtractionStatus,
     setVectorIndex(vi) { vectorIndex = vi; },
     setReranker(rn) { reranker = rn; },
     setRecallRecorder(fn) { recallRecorder = fn; },
@@ -3106,11 +3179,17 @@ export function createService({ store, mirror, config, onWrite, logger, document
     },
     remove: (id) => {
       const row = store.getById(id);
-      if (!row) return;
+      if (!row) return false;
       assertJobScene(row);
-      store.remove(id);
+      // store.remove has an intentional mixed contract: `false` means the
+      // protected row was refused, while successful deletion returns undefined.
+      // Never treat undefined as failure (that would report a real delete as a
+      // miss), and never notify/mirror a refused delete.
+      const removed = store.remove(id);
+      if (removed === false) return false;
       afterSync("write");
       notifyWrite();
+      return true;
     },
     update: updateMemory,
     // v0.8.1 底座：scope 归属修正审计（单条记忆，新→旧）。
@@ -3143,6 +3222,13 @@ export function createService({ store, mirror, config, onWrite, logger, document
       const sync = afterSync("write");
       notifyWrite();
       scheduleEmbed(updated);
+      // A successful CAS that changes the semantic text is a normal content
+      // write: run the same extraction path as saveWithDedupe so the entity/
+      // attribute face reflects the corrected body. CAS misses returned above,
+      // and importance/tag-only patches must not trigger a redundant LLM pass.
+      if (old && updated && (old.content !== updated.content || old.title !== updated.title)) {
+        scheduleEntityExtraction(updated);
+      }
       // Audit peer B: mirror sync failure on a CAS write must surface too.
       if (!sync?.success && !sync?.deferred) {
         Object.defineProperty(updated, "_mirror", {

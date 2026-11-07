@@ -1054,10 +1054,12 @@ export const apply = (ctx, config) => {
   // a per-type read-then-merge loop would overwrite edits in files not yet read
   // (e.g. preferences.md merging would clobber unsynced projects.md edits).
   const humanEdits = new Map();
+  let runtimeClosing = false;
   for (const type of Object.keys(TYPE_FILE)) {
     humanEdits.set(type, mirror.readHumanEdits(type));
   }
   const applyHumanEdits = () => {
+    if (runtimeClosing) return;
     for (const [type, edits] of humanEdits) {
       if (edits.length) service.mergeHumanEdits(type, edits);
     }
@@ -1455,14 +1457,27 @@ export const apply = (ctx, config) => {
   // so an in-flight dream run is allowed to finish before the SQLite store is
   // closed — dream.dispose() resolves only after its current run settles.
   return async () => {
-    for (const dispose of disposers) {
-      if (typeof dispose === "function") dispose();
+    runtimeClosing = true;
+    try {
+      for (const dispose of disposers) {
+        if (typeof dispose !== "function") continue;
+        const result = dispose();
+        if (result && typeof result.then === "function") await result;
+      }
+      const commandDispose = commands?.dispose?.();
+      if (commandDispose && typeof commandDispose.then === "function") await commandDispose;
+      const recorderDispose = recorder?.dispose?.();
+      if (recorderDispose && typeof recorderDispose.then === "function") await recorderDispose;
+      if (dream) await dream.dispose();
+      const sleepDispose = sleep?.dispose?.();
+      if (sleepDispose && typeof sleepDispose.then === "function") await sleepDispose;
+    } finally {
+      try {
+        await disposeSceneAclHandshake();
+      } finally {
+        store.close();
+      }
     }
-    commands?.dispose();
-    recorder?.dispose();
-    if (dream) await dream.dispose();
-    if (sleep) sleep.dispose();
-    await disposeSceneAclHandshake();
-    store.close();
   };
 };
+

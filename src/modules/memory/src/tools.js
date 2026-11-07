@@ -878,15 +878,16 @@ export function createTools(ctx, service, config, embedder, access = null, recen
         schema: {
           type: "object",
           additionalProperties: false,
-          properties: { deleted: { type: "boolean", required: true } }
+          properties: { deleted: { type: "boolean", required: true }, protected: { type: "boolean" } }
         },
-        render: (_args, value) => TEXT_OUTPUT(value.deleted ? "Memory deleted." : "Memory not found.")
+        render: (_args, value) => TEXT_OUTPUT(value.deleted ? "Memory deleted." : value.protected ? "Protected memory was not deleted." : "Memory not found.")
       },
       async execute(args) {
         // 复核项 4（#170）：不可见（explicit 他 scope）= 视作不存在，无存在性泄漏。
         const target = visibleForTool(args.id, arguments[1]);
-        if (target) service.remove(args.id);
-        return { deleted: !!target };
+        const removed = target ? service.remove(args.id) === true : false;
+        if (removed) return { deleted: true };
+        return target?.protected === true ? { deleted: false, protected: true } : { deleted: false };
       }
     }),
 

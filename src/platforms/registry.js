@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
-import {SocialJournal,socialPolicy,socialInput} from './social-journal.js';
+import {SocialJournal,socialPolicy,normalizeSocialAction} from './social-journal.js';
 import { atomicJson } from '../core/store.js';
 export const PLATFORM_READS=['read','search','browse','comments','related','subtitles','images'];
 export const PLATFORM_SOCIAL=['like','favorite','comment','reply','follow','message','publish'];
@@ -57,7 +57,7 @@ export class PlatformRegistry {
       if(!e.enabled||!OPERATIONS.has(operation)||!e.permissions.includes(operation))throw Error('CORE_PLATFORM_DENIED');
       const writing=!e.adapter.simulated&&PLATFORM_SOCIAL.includes(operation);
       if(writing&&e.adapter.socialWrites!==true)throw Error('CORE_PLATFORM_UNSUPPORTED');
-      const actionInput=writing?socialInput(operation,input):null;
+      const actionInput=writing?normalizeSocialAction(e.adapter,operation,input):null;
       if(!e.adapter.simulated)await this.accounts?.ensure?.(id);
       const account=e.adapter.simulated?null:this.accounts?.context(id),accountEpoch=this.accounts?.epoch(id);
       if((e.adapter.requiresAccount||writing)&&!account)throw Error('CORE_PLATFORM_LOGIN_REQUIRED');
@@ -71,13 +71,17 @@ export class PlatformRegistry {
         executionSignal.throwIfAborted();this.authorizeIdentity?.(identity);
         if(!e.enabled||generation!==e.generation||!e.permissions.includes(operation)||(!e.adapter.simulated&&(accountEpoch!==this.accounts?.epoch(id)||account?.accountId!==this.accounts?.context(id)?.accountId)))throw Error('CORE_PLATFORM_REVOKED');
       };
-      const key=writing?this.journal.reserve(id,account.accountId,operation,actionInput,identity,e.social):null;
+      let key;
       try {
+      // Local-only preflight must not send. Reject known missing prerequisites
+      // before reserving a possibly-ambiguous external action.
+      if(writing){await e.adapter.preflightAction?.(operation,actionInput,{credentials:account.credentials,identity:Object.freeze({...identity}),assertAuthorized,signal:executionSignal});assertAuthorized();}
+      key=writing?this.journal.reserve(id,account.accountId,operation,actionInput,identity,e.social):null;
       const next={...this.budget,used:{...this.budget.used,[id]:e.used+1},lastCalls:{...this.budget.lastCalls,[id]:this.now()}};
       // Charge before dispatch; crashes/uncertain failures never refund a call.
       if(this.budgetFile)atomicJson(this.budgetFile,next);
       this.budget=next;e.used++;e.lastCall=this.now();
-      const result=await e.adapter.execute(operation,structuredClone(writing?{...actionInput,...(input.xsecToken?{xsecToken:input.xsecToken}:{})}:input),{signal:executionSignal,credentials:account?.credentials,assertAuthorized});
+      const result=await e.adapter.execute(operation,structuredClone(writing?{...actionInput,...(input.xsecToken?{xsecToken:input.xsecToken}:{})}:input),{signal:executionSignal,credentials:account?.credentials,identity:Object.freeze({...identity}),assertAuthorized});
       assertAuthorized();
       if(writing&&(result?.status!=='confirmed'||result.operation!==operation||result.contentId!==actionInput.id))throw Error('CORE_PLATFORM_ACTION_UNKNOWN');
       signal?.throwIfAborted();

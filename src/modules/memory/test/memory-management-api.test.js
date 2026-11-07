@@ -70,6 +70,39 @@ async function call(route, options) {
   return { status: res.status, json };
 }
 
+test("protected owner delete returns 409 until explicit Core delete succeeds", async () => {
+  const h = setup();
+  try {
+    const created = await call(h.route, {
+      method: "POST", url: "/api/amadeus-memory/admin/memory",
+      body: { type: "history", title: "Protected delete", content: "A synthetic protected body with enough length." }
+    });
+    const id = created.json.data.memory.id;
+    h.store.setProtected(id, true, { by: "settings-page" });
+
+    const refused = await call(h.route, {
+      method: "POST", url: "/api/amadeus-memory/admin/memory/delete",
+      body: { id, confirm: "DELETE" }
+    });
+    assert.equal(refused.status, 409);
+    assert.equal(refused.json.error, "memory is protected");
+    assert.equal(h.store.getById(id).protected, true, "protected row remains after refused delete");
+    assert.equal((await call(h.route, { url: `/api/amadeus-memory/admin/memory?id=${encodeURIComponent(id)}` })).status, 200);
+
+    const explicit = await call(h.route, {
+      method: "POST", url: "/api/amadeus-memory/admin/core",
+      body: { action: "delete", id, confirm: "DELETE" }
+    });
+    assert.equal(explicit.status, 200);
+    assert.equal(explicit.json.data.deleted, id);
+    assert.equal(h.store.getById(id), undefined, "explicit Core delete really removes the row");
+    assert.equal((await call(h.route, { url: `/api/amadeus-memory/admin/memory?id=${encodeURIComponent(id)}` })).status, 404);
+  } finally {
+    h.close();
+    h.cleanup();
+  }
+});
+
 test("ordinary GUI memory CRUD validates input, supports stale checks and preserves data on reset", async () => {
   const h = setup();
   try {

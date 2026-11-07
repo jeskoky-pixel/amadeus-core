@@ -141,7 +141,8 @@ const DICT = {
     setupIntro: '选择一个安全预设，然后保存并在需要时重启。预设只会修改配置；首次 bootstrap 会创建默认身份。',
     core: '仅核心管理', autonomous: '自主唤醒', activity: '本地活动',
     coreHelp: '不启用 Host 唤醒、idle、自主预算或新活动工具。', autonomousHelp: '只对 allowlist Session 启用低频到期/idle 唤醒，默认预算和 bootstrap。', activityHelp: '启用本地虚拟活动工具和 bootstrap；Host 唤醒仍关闭。',
-    sessionIds: 'Session allowlist（每行或逗号分隔）', applyPreset: '应用预设到草稿', bootstrapNow: '立即创建默认身份',
+    sessionIds: '允许自主唤醒的会话（多选）', applyPreset: '应用预设到草稿', bootstrapNow: '立即创建默认身份',
+    manualBindingTitle: '绑定其他 Session', manualBindingHelp: '可为不属于当前 Workspace 的可信 DSH Session 创建独立 Persona / Scene 绑定。只输入你确认拥有的 Session ID。', manualBindingId: 'Session ID', manualBindingAction: '创建绑定',
     allowlistTitle: '允许接收自主唤醒的 Session', allowlistHelp: '不会枚举或伪造 Session；请从 DSH Session 列表复制合法 ID。授权与私有范围由现有 binding 决定。',
     externalMessageTitle: '外发提示（仅限工具来源的 intent wake）',
     bindings: 'Persona / Scene 绑定', privacy: '范围', private: '私有', shared: '共享', active: '有效', revoked: '已撤销',
@@ -194,7 +195,8 @@ const DICT = {
     setupIntro: 'Pick a safe preset, save it, and restart if needed. Presets only change config; first-run bootstrap creates the default identity.',
     core: 'Core only', autonomous: 'Autonomous wake', activity: 'Local activity',
     coreHelp: 'No Host wake, idle, autonomous budget, or new activity tools.', autonomousHelp: 'Low-frequency due/idle wake only for allowlisted Sessions, with default budget and bootstrap.', activityHelp: 'Local virtual activity tools and bootstrap; Host wake remains off.',
-    sessionIds: 'Session allowlist (one per line or comma separated)', applyPreset: 'Apply preset to draft', bootstrapNow: 'Create default identity now',
+    sessionIds: 'Sessions allowed to wake (multiple selection)', applyPreset: 'Apply preset to draft', bootstrapNow: 'Create default identity now',
+    manualBindingTitle: 'Bind another Session', manualBindingHelp: 'Create an independent Persona / Scene binding for a trusted DSH Session outside the current Workspace. Enter only a Session ID you control.', manualBindingId: 'Session ID', manualBindingAction: 'Create binding',
     allowlistTitle: 'Sessions allowed to receive autonomous wake', allowlistHelp: 'Sessions are not enumerated or invented. Copy valid ids from the DSH Session list. Binding/privacy stays authoritative.',
     externalMessageTitle: 'External-tool guidance (model-tool intent wake only)',
     bindings: 'Persona / Scene bindings', privacy: 'Privacy', private: 'Private', shared: 'Shared', active: 'Active', revoked: 'Revoked',
@@ -251,14 +253,22 @@ function fieldHelp(field, lang) {
 function defaultValue(field) {
   return Array.isArray(field.default) ? [...field.default] : field.default;
 }
-function ConfigFields({ fields, draft, change, disabled, lang, t, errors = {} }) {
+function SessionPicker({id, value, multiple=false, sessions=[], disabled, lang, onChange}) {
+ const selected=multiple?(Array.isArray(value)?value:[]):value?[value]:[];
+ const options=sessionChoices(sessions,selected,lang);
+ if(!multiple)return h('select',{id,value:value||'',disabled,onChange:e=>onChange(e.target.value)},h('option',{value:''},lang==='zh'?'请选择会话':'Choose a session'),...options.map(o=>h('option',{key:o.id,value:o.id,disabled:o.unavailable},o.label)));
+ return h('div',{id,role:'group',style:{maxHeight:240,overflowY:'auto',display:'grid',gap:8}},options.length?null:h('p',{className:'muted'},lang==='zh'?'当前工作区没有可选会话':'No available sessions in this workspace'),...options.map(o=>h('label',{key:o.id,style:{display:'flex',gap:8,alignItems:'center'}},h('input',{type:'checkbox',checked:selected.includes(o.id),disabled:disabled||(o.unavailable&&!selected.includes(o.id)),onChange:e=>onChange(e.target.checked?[...selected,o.id]:selected.filter(v=>v!==o.id))}),o.label)));
+}
+function ConfigFields({ fields, draft, change, disabled, lang, t, errors = {}, sessions = [] }) {
   return h(
     'div',
     null,
     fields.map((field) => {
       const value = draft.values[field.key];
       const id = 'life-config-' + field.key;
-      const control = field.type === 'boolean'
+      const control = ['allowedSessionIds','externalMessageSessionIds','idleTargetSessionId'].includes(field.key)
+        ? h(SessionPicker,{id,value,multiple:field.type==='array',sessions,disabled,lang,onChange:v=>change(field.key,v)})
+        : field.type === 'boolean'
         ? h('label', { className: 'switch', htmlFor: id },
             h('input', { id, type: 'checkbox', checked: value === true, disabled, onChange: (e) => change(field.key, e.target.checked) }),
             h('span', null, value ? t('enabled') : t('disabled')))
@@ -308,6 +318,7 @@ function Panel({ ctx }) {
   const [backups, setBackups] = React.useState([]);
   const [workspaceData, setWorkspaceData] = React.useState(null);
   const [workspaceChoice, setWorkspaceChoice] = React.useState('');
+  const [manualSessionId, setManualSessionId] = React.useState('');
   const [ruleDrafts, setRuleDrafts] = React.useState({});
   const [intentForm, setIntentForm] = React.useState({ targetSessionId: '', description: '', reviewAt: '' });
   const [activityForm, setActivityForm] = React.useState({ targetSessionId: '', description: '', intentId: '' });
@@ -476,6 +487,22 @@ function Panel({ ctx }) {
           personaName: draft.values.bootstrapPersonaName || 'Amadeus',
         }),
       });
+      setMessage(t('setupReady') + ' ' + (result.setup.personaId || ''));
+      await loadData();
+    } catch (e) { setError(t('setupFailed') + e.message); }
+    finally { setBusy(false); }
+  };
+
+  const bindManualSession = async () => {
+    const sessionId = manualSessionId.trim();
+    if (!sessionId) return setError(t('invalidSessionId'));
+    setBusy(true); setError('');
+    try {
+      const result = await api('/bootstrap', {
+        method: 'POST',
+        body: JSON.stringify({ sessionIds: [sessionId], personaName: draft?.values.bootstrapPersonaName || 'Amadeus' }),
+      });
+      setManualSessionId('');
       setMessage(t('setupReady') + ' ' + (result.setup.personaId || ''));
       await loadData();
     } catch (e) { setError(t('setupFailed') + e.message); }
@@ -693,28 +720,22 @@ function Panel({ ctx }) {
           h('button', { type: 'button', onClick: () => preset('activity') }, t('activity'))),
         h('small', null, t('coreHelp')), h('small', null, t('autonomousHelp')), h('small', null, t('activityHelp')),
         h('label', { htmlFor: 'life-session-ids' }, h('strong', null, t('sessionIds'))),
-        h('textarea', {
-          id: 'life-session-ids', value: (draft.values.allowedSessionIds || []).join('\n'),
-          onChange: (e) => change('allowedSessionIds', e.target.value.split(/[\n,]/).map((v) => v.trim()).filter(Boolean)),
-        }),
+        h(SessionPicker,{id:'life-session-ids',value:draft.values.allowedSessionIds,multiple:true,sessions:workspaceData?.sessions??[],disabled,lang,onChange:v=>change('allowedSessionIds',v)}),
         h('div', { className: 'actions' },
           h('button', { type: 'button', onClick: bootstrapNow, disabled: busy }, t('bootstrapNow')))),
       h('div', { className: 'panel' }, h('h3', null, t('advanced')), h('p', null, t('advancedHelp')),
-        h(ConfigFields, { fields: commonFields, draft, change, disabled, lang, t, errors })))
+        h(ConfigFields, { fields: commonFields, draft, change, disabled, lang, t, errors, sessions: workspaceData?.sessions ?? [] })))
       : null,
     tab === 'sessions' ? h('div', null,
       h('div', { className: 'panel' },
         h('h3', null, t('allowlistTitle')),
         h('p', null, t('allowlistHelp')),
-        h('textarea', {
-          value: (draft.values.allowedSessionIds || []).join('\n'),
-          onChange: (e) => change('allowedSessionIds', e.target.value.split(/[\n,]/).map((v) => v.trim()).filter(Boolean)),
-        })),
+        h(SessionPicker,{value:draft.values.allowedSessionIds,multiple:true,sessions:workspaceData?.sessions??[],disabled,lang,onChange:v=>change('allowedSessionIds',v)})),
       h('div', { className: 'panel' },
         h('h3', null, t('externalMessageTitle')),
         h(ConfigFields, {
           fields: FIELDS.filter((field) => field.key === 'externalMessageSessionIds'),
-          draft, change, disabled, lang, t, errors,
+          draft, change, disabled, lang, t, errors, sessions: workspaceData?.sessions ?? [],
         })),
       h('div', { className: 'panel' },
         h('h3', null, t('bindings')),
@@ -750,7 +771,17 @@ function Panel({ ctx }) {
                         disabled: busy,
                         onClick: () => revoke(binding.targetSessionId),
                       }, t('revoke'))))
-                ))))))
+                ))))))),
+      h('div', { className: 'panel' },
+        h('h3', null, t('manualBindingTitle')),
+        h('p', { className: 'muted' }, t('manualBindingHelp')),
+        h('div', { className: 'row' },
+          h('label', { htmlFor: 'life-manual-session' }, h('strong', null, t('manualBindingId'))),
+          h('input', {
+            id: 'life-manual-session', type: 'text', value: manualSessionId, disabled: busy,
+            placeholder: 'session-…', onChange: (e) => setManualSessionId(e.target.value),
+          }),
+          h('button', { type: 'button', className: 'primary', onClick: bindManualSession, disabled: busy || !manualSessionId.trim() }, t('manualBindingAction')))),
     ) : null,
     tab === 'intents' ? h('div', null,
       h('div', { className: 'panel' }, h('h3', null, t('intentFormTitle')),
@@ -758,7 +789,7 @@ function Panel({ ctx }) {
         h('select', {
           id: 'life-intent-session', value: intentForm.targetSessionId,
           onChange: (e) => setIntentForm((previous) => ({ ...previous, targetSessionId: e.target.value })),
-        }, h('option', { value: '' }, '—'), sessionOptions.map((sessionId) => h('option', { key: sessionId, value: sessionId }, sessionId))),
+        }, h('option', { value: '' }, '—'), sessionOptions.map((sessionId) => h('option', { key: sessionId, value: sessionId }, sessionChoices(workspaceData?.sessions??[],[sessionId],lang).find(o=>o.id===sessionId)?.label??sessionId))),
         h('label', { htmlFor: 'life-intent-description' }, h('strong', null, t('intentDescription'))),
         h('textarea', {
           id: 'life-intent-description', value: intentForm.description,
@@ -786,7 +817,7 @@ function Panel({ ctx }) {
         h('select', {
           id: 'life-activity-session', value: activityForm.targetSessionId,
           onChange: (e) => setActivityForm((previous) => ({ ...previous, targetSessionId: e.target.value })),
-        }, h('option', { value: '' }, '—'), sessionOptions.map((sessionId) => h('option', { key: sessionId, value: sessionId }, sessionId))),
+        }, h('option', { value: '' }, '—'), sessionOptions.map((sessionId) => h('option', { key: sessionId, value: sessionId }, sessionChoices(workspaceData?.sessions??[],[sessionId],lang).find(o=>o.id===sessionId)?.label??sessionId))),
         h('label', { htmlFor: 'life-activity-description' }, h('strong', null, t('activityDescription'))),
         h('textarea', {
           id: 'life-activity-description', value: activityForm.description,
@@ -889,7 +920,7 @@ function Panel({ ctx }) {
       h('div', { className: 'panel' },
         h('h3', null, t('advanced')),
         h('p', null, t('advancedHelp')),
-        h(ConfigFields, { fields: advancedFields, draft, change, disabled, lang, t, errors })),
+        h(ConfigFields, { fields: advancedFields, draft, change, disabled, lang, t, errors, sessions: workspaceData?.sessions ?? [] })),
       h('div', { className: 'panel' },
         h('h3', null, t('bundle')),
         h('div', { className: 'grid' },
@@ -939,6 +970,7 @@ function DetailCard({ ctx }) {
   const [snapshot, setSnapshot] = React.useState(null);
   const [draft, setDraft] = React.useState(null);
   const [health, setHealth] = React.useState(null);
+  const [workspaceData,setWorkspaceData]=React.useState(null);
   const [busy, setBusy] = React.useState(false);
   const [message, setMessage] = React.useState('');
   const [error, setError] = React.useState('');
@@ -948,6 +980,7 @@ function DetailCard({ ctx }) {
     try {
       const status = await api('/status');
       setHealth(status);
+      const data=await api('/workspace');setWorkspaceData(data.workspace??null);
     } catch (e) {
       setHealth(null);
       setError(e.message);
@@ -1037,7 +1070,7 @@ function DetailCard({ ctx }) {
     error ? h('div', { className: 'message error', role: 'alert' }, error) : null,
     hasErrors ? h('div', { className: 'message error', role: 'alert' }, t('invalidFields')) : null,
     message ? h('div', { className: 'message success', role: 'status' }, message) : null,
-    h(ConfigFields, { fields: DETAIL_FIELDS, draft, change, disabled, lang, t, errors }),
+    h(ConfigFields, { fields: DETAIL_FIELDS, draft, change, disabled, lang, t, errors, sessions: workspaceData?.sessions ?? [] }),
     h('div', { className: 'actions' },
       h('button', { type: 'button', className: 'primary', onClick: save, disabled: disabled || hasErrors || !dirty },
         busy ? t('saving') : t('save')),
@@ -1120,3 +1153,4 @@ return {
     }
   },
 };
+

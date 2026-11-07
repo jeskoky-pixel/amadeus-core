@@ -1,5 +1,6 @@
 import {spawnSync} from 'node:child_process';
 import fs from 'node:fs';
+import {createHash} from 'node:crypto';
 import path from 'node:path';
 import assert from 'node:assert/strict';
 const root=path.resolve(import.meta.dirname,'..'),pkg=JSON.parse(fs.readFileSync(path.join(root,'package.json')));
@@ -9,7 +10,7 @@ const result=spawnSync(process.execPath,[npmCli,'pack','--ignore-scripts','--dry
 if(result.status!==0)throw Error(result.stderr);
 const parsed=JSON.parse(result.stdout),pack=Array.isArray(parsed)?parsed[0]:parsed[pkg.name],files=new Set(pack.files.map(f=>f.path));
 assert.equal(pkg.name,'@fg-lab/amadeus-core');assert.equal(pkg.private,true);
-assert.equal(pkg.version,'0.2.0-alpha.5');
+assert.equal(pkg.version,'0.2.0-alpha.6');
 for(const file of ['src/index.js','lib/client.js','cordis.patch.yml','LICENSE','NOTICE.md',
  ...['memory','life','state','persona'].flatMap(n=>[`src/modules/${n}/src/index.js`,`src/modules/${n}/LICENSE`])])assert(files.has(file),`Missing ${file}`);
 for(const file of files){
@@ -22,3 +23,5 @@ assert.equal(patches.length,1);
 const loader=fs.readFileSync(path.join(root,'lib/client.js'),'utf8');
 assert(loader.startsWith("window.__ModuleLoader__.load({id:'@fg-lab/amadeus-core'"));
 console.log(JSON.stringify({name:pkg.name,version:pkg.version,files:files.size,unpackedSize:pack.unpackedSize,status:'pass'}));
+
+if(process.platform==='win32'){const bin='lib/xhs/amadeus-xhs-executor.exe';assert(files.has(bin),'Windows candidate must include prebuilt executor');const manifest=JSON.parse(fs.readFileSync(path.join(root,'lib/xhs/executor.json'),'utf8'));assert.equal(manifest.sha256,createHash('sha256').update(fs.readFileSync(path.join(root,bin))).digest('hex'));assert(files.has('lib/xhs/LICENSE.upstream'));}

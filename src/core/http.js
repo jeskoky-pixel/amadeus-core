@@ -32,6 +32,7 @@ export function createCoreHandler(ctx, runtime) {
       else if (pathname === PREFIX + '/apply') data = await runtime.applyChanges();
       else if (pathname === PREFIX + '/simulate') data = await runtime.simulate();
       else if (pathname === PREFIX + '/prepare-exploration') data = await runtime.prepareExploration();
+      else if (pathname === PREFIX + '/prepare-autonomous-life') data = await runtime.prepareAutonomousLife();
       else if (pathname === PREFIX + '/activity') data = await runtime.controlActivity(body.action);
       else if (pathname === PREFIX + '/mcp/save') data = await runtime.serial(()=>runtime.mcp.save(body.server,body.revision));
       else if (pathname === PREFIX + '/mcp/remove') data = await runtime.serial(()=>runtime.mcp.remove(body.id,body.revision));
@@ -55,3 +56,4 @@ export function createCoreHandler(ctx, runtime) {
 export function mountCoreHttp(ctx, runtime) {
   ctx.effect(() => ctx.webServer.register({ kind: 'prefix', path: PREFIX, handler: createCoreHandler(ctx, runtime) }));
 }
+

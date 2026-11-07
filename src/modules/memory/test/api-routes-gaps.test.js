@@ -116,6 +116,22 @@ test("delete removes an existing memory", async () => {
   assert.equal(service.count(), 0);
 });
 
+test("delete refuses a protected memory with 409 and keeps it readable", async () => {
+  const { routes, service, store } = setup("secret-token");
+  const route = handler(routes, "/api/dsh-mneme/delete");
+  const { memory } = service.saveWithDedupe({ type: "project", title: "受保护删除", content: "不能删除的正文" });
+  store.setProtected(memory.id, true, { by: "test" });
+
+  const res = new FakeRes();
+  const ok = req("/api/dsh-mneme/delete", "POST", { id: memory.id });
+  ok.headers = { authorization: "Bearer secret-token" };
+  await route.handler(ok, res);
+  assert.equal(res.statusCode, 409);
+  assert.deepEqual(JSON.parse(res.body), { error: "protected-memory" });
+  assert.equal(service.getById(memory.id).protected, true);
+  assert.equal(service.remove(memory.id), false, "service also reports the refusal");
+});
+
 // ---------------------------------------------------------------------------
 // /api/dsh-mneme/entities
 // ---------------------------------------------------------------------------
@@ -125,7 +141,11 @@ test("entities directory is read-only and returns empty list", async () => {
   const res = new FakeRes();
   await route.handler(req("/api/dsh-mneme/entities"), res);
   assert.equal(res.statusCode, 200);
-  assert.deepEqual(JSON.parse(res.body), { entities: [], total: 0 });
+  assert.deepEqual(JSON.parse(res.body), {
+    entities: [],
+    total: 0,
+    status: { enabled: false, runtimeEnabled: false, installed: false, pending: 0, last: null }
+  });
 });
 
 test("entities lists seeded entities without auth", async () => {

@@ -7,12 +7,20 @@ export function socialPolicy(value={}) {
  if(!Array.isArray(noteIds)||noteIds.length>100||noteIds.some(x=>typeof x!=='string'||!/^[a-f0-9]{24}$/.test(x))||!Array.isArray(sessionIds)||sessionIds.length>100||sessionIds.some(x=>typeof x!=='string'||!x||x.length>256)||!Number.isSafeInteger(dailyLimit)||dailyLimit<1||dailyLimit>100||!Number.isSafeInteger(cooldownMs)||cooldownMs<1000||cooldownMs>3600000)fail('SOCIAL_CONFIG');
  return {noteIds:[...new Set(noteIds)],sessionIds:[...new Set(sessionIds)],dailyLimit,cooldownMs};
 }
-export function socialInput(operation,input) {
- if(!['like','comment','reply'].includes(operation)||!input||typeof input.id!=='string'||!/^[a-f0-9]{24}$/.test(input.id))fail('SOCIAL_INPUT');
+export function socialInput(operation,input,targetKind='xhs-note') {
+ const target=targetKind==='bilibili-video'?/^BV[0-9A-Za-z]{10}$/:targetKind==='xhs-note'?/^[a-f0-9]{24}$/:targetKind==='opaque-content'?/^[A-Za-z0-9._:-]{1,128}$/:null;
+ const comment=targetKind==='bilibili-video'?/^[1-9][0-9]{0,19}$/:targetKind==='opaque-content'?/^[A-Za-z0-9._:-]{1,128}$/:/^[a-f0-9]{24}$/;
+ if(!target||!['like','comment','reply'].includes(operation)||!input||typeof input.id!=='string'||!target.test(input.id))fail('SOCIAL_INPUT');
  if(operation==='like'&&input.liked!==true)fail('SOCIAL_INPUT');
  if(operation!=='like'&&(typeof input.text!=='string'||!input.text.trim()||input.text.length>500))fail('SOCIAL_INPUT');
- if(operation==='reply'&&(typeof input.commentId!=='string'||!/^[a-f0-9]{24}$/.test(input.commentId)))fail('SOCIAL_INPUT');
+ if(operation==='reply'&&(typeof input.commentId!=='string'||!comment.test(input.commentId)))fail('SOCIAL_INPUT');
  return {id:input.id,...(operation==='like'?{liked:true}:{text:input.text.trim()}),...(operation==='reply'?{commentId:input.commentId}:{})};
+}
+// An optional trusted adapter validator supports future target formats without
+// allowing model-supplied validators, endpoints or secret-bearing action fields.
+export function normalizeSocialAction(adapter,operation,input){
+ if(typeof adapter.normalizeSocialInput==='function')return socialInput(operation,adapter.normalizeSocialInput(operation,structuredClone(input)),'opaque-content');
+ return socialInput(operation,input,adapter.socialTargetKind);
 }
 // A crash after durable reservation is uncertain, never a reason to replay.
 // Hashes avoid storing private comment bodies or URL security tokens.
@@ -24,7 +32,7 @@ export class SocialJournal {
  }
  reserve(platform,account,operation,input,identity,policy) {
   if(!this.file)fail('JOURNAL_REQUIRED');
-  if(!policy.noteIds.includes(input.id)||!policy.sessionIds.includes(identity.sessionId))fail('TARGET_DENIED');
+  if(!policy.sessionIds.includes(identity.sessionId))fail('TARGET_DENIED');
   const key=createHash('sha256').update(JSON.stringify([platform,account,operation,input])).digest('hex');
   if(this.state.entries.some(e=>e.key===key))fail('ACTION_ALREADY_RECORDED');
   if(this.state.entries.length>=10000)fail('JOURNAL_CAPACITY');

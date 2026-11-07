@@ -26,6 +26,15 @@ jobs:
         env:
           CORE_BROWSER_CHANNEL: chromium
       - run: npm run test:modules
+      - uses: actions/setup-go@v5
+        if: runner.os == 'Windows'
+        with:
+          go-version: '1.27.3'
+          cache: false
+      - name: Build pinned native XHS executor (Windows, no platform login)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./services/xhs-executor/build.ps1
       - run: npm run pack:check
       - name: Build candidate archive
         run: npm pack --ignore-scripts

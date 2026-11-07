@@ -249,6 +249,21 @@ test("memory_delete on missing id returns deleted:false", async () => {
   assert.equal(result.deleted, false);
 });
 
+test("memory_delete never claims a protected row was deleted", async () => {
+  const { registered, service, store } = setup();
+  const { memory } = service.saveWithDedupe({ type: "history", title: "protected delete", content: "受保护正文" });
+  store.setProtected(memory.id, true, { by: "test" });
+  const del = registered.find((t) => t.name === "memory_delete");
+  const result = await del.execute({ id: memory.id });
+  assert.equal(result.deleted, false);
+  assert.equal(result.protected, true);
+  assert.equal(store.getById(memory.id).protected, true, "protected row remains");
+  store.setProtected(memory.id, false, { by: "test" });
+  const removed = await del.execute({ id: memory.id });
+  assert.equal(removed.deleted, true);
+  assert.equal(store.getById(memory.id), undefined);
+});
+
 test("memory_forget suppresses injection without deleting", async () => {
   const { registered, service, store } = setup();
   const { memory } = service.saveWithDedupe({ type: "project", title: "t", content: "c", importance: 5 });

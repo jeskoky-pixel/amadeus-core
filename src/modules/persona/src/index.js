@@ -94,6 +94,10 @@ export function normalizeConfig(raw) {
  */
 function optionalService(ctx, service) {
   try {
+    const found = ctx.reflect?.get?.(service);
+    if (found !== undefined) return found;
+  } catch { /* Optional service; preserve older Host fallbacks. */ }
+  try {
     if (typeof ctx.get === 'function') {
       const found = ctx.get(service);
       if (found !== undefined) return found;
@@ -151,8 +155,13 @@ export function apply(ctx, rawConfig = {}) {
     getMemory: () => optionalService(ctx, 'amadeus.memory'),
     getMemoryPersonaState: typeof rawConfig.__coreBridge==='function' ? ()=>'disabled-by-core' : undefined,
     getSessionHeader: sessionId => sessionHeader(ctx, sessionId),
-    getAgent: sessionId => {
-      try { return ctx.agents?.get?.(sessionId); } catch { return undefined; }
+    getAgent: async sessionId => {
+      try {
+        const live = optionalService(ctx, 'agents')?.get?.(sessionId);
+        if (live) return live;
+        const resolved = await optionalService(ctx, 'sessionController')?.resolveAgent?.(sessionId);
+        return resolved?.agent;
+      } catch { return undefined; }
     },
     assemblePrompt: agent => ctx.systemPrompt.assemble({ agent, scope: agent }),
   });

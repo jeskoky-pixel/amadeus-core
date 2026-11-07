@@ -216,6 +216,14 @@ function sessionScope(exec) {
  * @param {Record<string, unknown>} definition - tool definition.
  */
 function registerTool(ctx, definition) {
+  // Profile reconciliation can apply the Core bundle more than once while
+  // retaining the same global ToolsService. Global Life tools are owned by
+  // Core, so keep the first definition and make a repeated registration a
+  // harmless no-op. Agent-scoped variants still use the agent context and do
+  // not pass through this global lookup.
+  if (typeof ctx.tools?.get === 'function' && ctx.tools.get(definition.name) !== undefined) {
+    return () => {}
+  }
   const allowed = new Set(Object.keys(definition.parameters?.properties ?? {}))
   const guardedExecute = definition.execute
   ctx.tools.register({
@@ -575,6 +583,7 @@ export function apply(ctx, config = {}) {
     core,
     v1: core.v1,
     getRegistry: () => workspaceRegistry,
+    getSessionTitle: id => suppliedConfig.__coreSessionTitle?.(id) ?? optionalService(ctx, 'sessions')?.get(id)?.header?.title ?? '',
     legacyAllowed: () => delivery.allowedSessionIds,
     budgetConfig: () => budgetConfig,
     logger: ctx.logger,
@@ -1163,3 +1172,4 @@ export function apply(ctx, config = {}) {
     throw error
   }
 }
+

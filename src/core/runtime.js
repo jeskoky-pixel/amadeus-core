@@ -11,9 +11,9 @@ import { CoreStore, MODULES, atomicJson } from './store.js';
 import { acquireLease, legacyConflicts, installLegacyGuard } from './ownership.js';
 import { host, member, assertIdle } from './host.js';
 import { AccountManager } from '../platforms/accounts.js';
-import {BrowserVault} from '../platforms/browser-vault.js';
-import {makeXhsBrowserAdapter} from '../platforms/xhs-browser.js';
+import {makeXhsNativeAdapter} from '../platforms/xhs-native-adapter.js';
 import {socialPolicy} from '../platforms/social-journal.js';
+import {BrowserVault} from '../platforms/browser-vault.js';
 import {makeBilibiliAdapter} from '../platforms/bilibili.js';
 import {makeXiaohongshuAdapter} from '../platforms/xiaohongshu.js';
 import {createPlatformTransport} from '../platforms/transport.js';
@@ -24,6 +24,7 @@ import { importData, rollbackData } from './import-data.js';
 import { finish } from './model-exploration.js';
 import { McpManager } from '../mcp/manager.js';
 import {makeBilibiliMock,makeXiaohongshuMock} from '../platforms/mock-platforms.js';
+import { buildLifeSummary } from './life-summary.js';
 
 const definitions = { memory, life, state, persona };
 const fields = { life: lifeFields, state: stateFields };
@@ -49,7 +50,7 @@ export class CoreRuntime {
     this.activeConfigs={};
     this.runningRevision = null; this.tail = Promise.resolve();
     this.accounts=new AccountManager({file:path.join(root,'platform-accounts.json'),workspaceId:()=>this.store.state.workspaceId});
-    const real=[makeXhsBrowserAdapter({vault:new BrowserVault({root:path.join(root,'browser-vault'),workspaceId:()=>this.store.state.workspaceId})}),makeBilibiliAdapter(),makeXiaohongshuAdapter({transport:createPlatformTransport({allowedOrigins:['https://openaccount.xiaohongshu.com']})})];
+    const real=[makeXhsNativeAdapter({root:path.join(root,'xhs-executor'),workspaceId:()=>this.store.state.workspaceId}),makeBilibiliAdapter({vault:process.platform==='win32'?new BrowserVault({root:path.join(root,'bilibili-vault'),workspaceId:()=>this.store.state.workspaceId}):null}),makeXiaohongshuAdapter({transport:createPlatformTransport({allowedOrigins:['https://openaccount.xiaohongshu.com']})})];
     this.platforms=new PlatformRegistry({budgetFile:path.join(root,'platform-budget.json'),journalFile:path.join(root,'platform-actions.json'),trustedRealAdapters:real,accounts:this.accounts,authorizeIdentity:identity=>member(this.ctx,this.store.state.workspaceId===identity?.workspaceId?identity.workspaceId:null,identity?.sessionId)});
     for(const adapter of real){this.accounts.register(adapter);this.platforms.register(adapter);}
     this.platforms.register(makeBilibiliMock());this.platforms.register(makeXiaohongshuMock());
@@ -89,6 +90,7 @@ export class CoreRuntime {
       const module = definitions[n];
       const config = { ...this.effectiveConfig(n), __coreBridge: bridge => { this.bridges[n] = bridge; } };
       if (n === 'memory') Object.assign(config, { memoryDir, ...memoryPolicy });
+      if (n === 'life') config.__coreSessionTitle = id => id === this.store.state.activitySessionId ? 'Amadeus 自主活动' : host(this.ctx, 'sessions')?.get(id)?.header?.title ?? '';
       if (n === 'life' || n === 'state') config.databasePath = path.join(moduleRoot, n, `${n}.sqlite`);
       if (n === 'persona') config.dataDirectory = path.join(moduleRoot, 'persona');
       this.activeConfigs[n]=config;
@@ -121,10 +123,11 @@ export class CoreRuntime {
     this.status = 'ready'; this.problem = null; this.runningRevision = settings.revision;
     this.bridges.life?.api.registerActivityProvider(this.activity);
     await this.activity.recover();
+    if(this.store.state.explorationEnabled&&this.bridges.life?.api&&this.bridges.memory?.unifiedRuntime)await this.activity.session();
     this.configureExplorationPlatforms();
   }
   configureExplorationPlatforms(){
-    for(const {id,simulated} of this.platforms.list())this.platforms.configure(id,this.store.state.platforms[id]??{enabled:simulated&&this.store.state.explorationEnabled===true,permissions:simulated?['read','search','browse']:[],maxRequests:20});
+    for(const {id,simulated,social} of this.platforms.list()){const config=this.store.snapshot().platforms[id]??{enabled:simulated&&this.store.state.explorationEnabled===true,permissions:simulated?['read','search','browse']:[],maxRequests:20};if(social)config.social={...config.social,sessionIds:this.store.state.activitySessionId?[this.store.state.activitySessionId]:[]};this.platforms.configure(id,config);}
   }
   savePlatform(input){return Promise.resolve().then(()=>{
     const wasApplied=this.runningRevision===this.store.state.revision;
@@ -132,7 +135,7 @@ export class CoreRuntime {
     if(!entry||!c||(c.autonomous!==undefined&&typeof c.autonomous!=='boolean')||(c.minIntervalMs!==undefined&&(!Number.isSafeInteger(c.minIntervalMs)||c.minIntervalMs<0||c.minIntervalMs>3600000))||typeof c.enabled!=='boolean'||!Array.isArray(c.permissions)||c.permissions.some(p=>!entry.adapter.capabilities.includes(p))||!Number.isSafeInteger(c.maxRequests)||c.maxRequests<1||c.maxRequests>1000)throw Error('CORE_PLATFORM_CONFIG');
     const social=socialPolicy(c.social);
     this.store.update(input.revision,s=>{s.platforms[input.id]={enabled:c.enabled,permissions:[...new Set(c.permissions)],maxRequests:c.maxRequests,autonomous:c.autonomous??entry.adapter.simulated===true,minIntervalMs:c.minIntervalMs??0,social};});
-    this.platforms.configure(input.id,this.store.state.platforms[input.id]);if(wasApplied)this.runningRevision=this.store.state.revision;return this.overview();
+    this.configureExplorationPlatforms();if(wasApplied)this.runningRevision=this.store.state.revision;return this.overview();
   });}
   dryRunPlatform(input){return this.serial(async()=>{
     if(this.status!=='ready')throw Error('CORE_NOT_READY');
@@ -147,7 +150,7 @@ export class CoreRuntime {
   });}
   platformAction(input){return this.serial(async()=>{
     if(this.status!=='ready')throw Error('CORE_NOT_READY');
-    if(input.id!=='xiaohongshu-browser'||!['like','comment','reply'].includes(input.operation))throw Error('CORE_PLATFORM_DENIED');
+    if(this.platforms.entries.get(input.id)?.adapter.socialWrites!==true||!['like','comment','reply'].includes(input.operation))throw Error('CORE_PLATFORM_DENIED');
     return this.activity.explore(({step})=>step===0?{platform:input.id,operation:input.operation,input:input.input}:null,{maxSteps:1,maxDurationMs:30000});
   });}
   async accountAction(input){
@@ -168,15 +171,44 @@ export class CoreRuntime {
       case 'verify':return this.accounts.verify(id);
       case 'refresh':return this.accounts.verify(id,{refresh:true});
       case 'logout':return this.accounts.logout(id);
-      case 'clear':return this.accounts.logout(id,{clear:true});
+      case 'clear':await this.accounts.clearSession(id);return this.accounts.logout(id,{clear:true});
       case 'revoke':return this.accounts.revoke(id);
       default:throw Error('CORE_PLATFORM_INPUT');
     }
   }
   prepareExploration(){return this.serial(async()=>{
     if(this.status!=='ready')throw Error('CORE_NOT_READY');
-    const session=await this.activity.session();return {sessionId:session.id};
+    const session=await this.activity.session();this.configureExplorationPlatforms();return {sessionId:session.id};
   });}
+  /**
+   * Opt the persistent Core Activity Session into Life delivery without
+   * granting external-message permission. This is an explicit owner action;
+   * it only writes the existing Life config and leaves the Host scheduler as
+   * the sole wake implementation. Applying the pending config performs the
+   * normal safe Life restart.
+   */
+  prepareAutonomousLife(){return this.serial(async()=>{
+    if(this.status!=='ready')throw Error('CORE_NOT_READY');
+    if(!this.store.state.modules.life.enabled||!this.bridges.life?.api)throw Error('CORE_LIFE_REQUIRED');
+    assertIdle(this.ctx,this.store.state.workspaceId);
+    const session=await this.activity.session();
+    member(this.ctx,this.store.state.workspaceId,session.id);
+    const current=this.effectiveConfig('life');
+    const allowed=[...new Set([...(Array.isArray(current.allowedSessionIds)?current.allowedSessionIds:[]),session.id])];
+    const external=(Array.isArray(current.externalMessageSessionIds)?current.externalMessageSessionIds:[]).filter(id=>allowed.includes(id));
+    const next={...current,wakeDeliveryEnabled:true,allowedSessionIds:allowed,externalMessageSessionIds:external};
+    const result=definitions.life.Config['~standard'].validate(next);
+    if(result.issues)throw Error('CORE_LIFE_CONFIG_INVALID');
+    this.store.update(this.store.state.revision,s=>{s.modules.life.config=next;});
+    return {sessionId:session.id,requiresApply:true,externalMessageOptIn:external.includes(session.id),lifeDelivery:this.lifeDelivery()};
+  });}
+  lifeDelivery(){
+    try{
+      const delivery=this.bridges.life?.api?.getHealth?.()?.delivery;
+      if(!delivery||typeof delivery!=='object')return null;
+      return {state:delivery.state??'unknown',reason:delivery.reason??null,enabled:delivery.enabled===true,bound:delivery.bound===true,allowedSessions:Number(delivery.allowedSessions)||0,intervalMs:delivery.intervalMs??null,maxPerDrive:delivery.maxPerDrive??null,timerActive:delivery.timerActive===true,reconciliation:delivery.reconciliation??null,unresolvedWakes:delivery.unresolvedWakes===true,idle:delivery.idle?.enabled===true,budget:delivery.budget?.enabled===true,missing:Array.isArray(delivery.missing)?delivery.missing:[]};
+    }catch{return {state:'unavailable',reason:'health_read_failed',enabled:false,bound:false,allowedSessions:0,intervalMs:null,maxPerDrive:null,timerActive:false,reconciliation:null,unresolvedWakes:false,idle:false,budget:false,missing:[]};}
+  }
   effectiveConfig(n) {
     if (!MODULES.includes(n)) throw Error('CORE_MODULE_INVALID');
     const saved = this.store.state.modules[n].config;
@@ -252,24 +284,27 @@ export class CoreRuntime {
       return this.overview();
     });
   }
-  overview() {
-    return { version: '0.2.0-alpha.5', status: this.status, problem: this.problem,
+  overview({ includeOwnerDetails = true } = {}) {
+    const lifeSummary = includeOwnerDetails ? buildLifeSummary(this) : null;
+    return { version: '0.2.0-alpha.6', status: this.status, problem: this.problem,
       workspaceId: this.store.state.workspaceId, revision: this.store.state.revision,
       runningRevision: this.runningRevision, pendingRestart: this.store.state.revision !== this.runningRevision,
       modules: Object.fromEntries(MODULES.map(n => [n, { enabled: this.store.state.modules[n].enabled, mounted: this.handles.has(n) }])),
       workspaces: (host(this.ctx, 'workspaceRegistry')?.list?.() ?? []).map(w => ({ id: w.id, title: w.title })),
       platforms:this.platforms.list().filter(p=>!p.simulated),
       simulations:this.platforms.list().filter(p=>p.simulated),activity:this.activity.summary(),experiences:this.experiences.ownerList(),
+      ...(lifeSummary ? { lifeSummary } : {}),
       explorationEnabled:this.store.state.explorationEnabled===true,
       activityBudgetMs:this.store.state.activityBudgetMs??120000,
       mcp:this.mcp.overview(),
+      lifeDelivery:this.lifeDelivery(),
       sessions:(host(this.ctx,'workspaceRegistry')?.get(this.store.state.workspaceId)?.sessionIds??[]).map(id=>{
         const s=host(this.ctx,'sessions')?.get(id);return {id,title:s?.header?.title??id};
       }),
       dataGeneration:this.store.state.dataGeneration??'original',canRollback:Object.hasOwn(this.store.state,'previousDataGeneration'),
     };
   }
-  api() { return Object.freeze({ contractVersion: 1, getHealth: () => this.overview(),
+  api() { return Object.freeze({ contractVersion: 1, getHealth: () => this.overview({ includeOwnerDetails: false }),
     assertSession: id => member(this.ctx, this.store.state.workspaceId, id),
     readExperience:(eventId,sessionId)=>this.experiences.read(eventId,sessionId) }); }
   simulate(){return this.serial(async()=>{
@@ -294,5 +329,6 @@ export class CoreRuntime {
   });}
   importData(input){return this.serial(()=>importData(this,input));}
   rollbackData(input){return this.serial(()=>rollbackData(this,input));}
-  async dispose() { this.status='stopping';this.accounts.dispose();await this.mcp.dispose();await this.tail; await this.stopModules(); this.release?.(); this.release = null; this.removeLegacyGuard?.();this.status = 'stopped'; }
+  async dispose() { this.status='stopping';await this.accounts.dispose();await this.mcp.dispose();await this.tail; await this.stopModules(); this.release?.(); this.release = null; this.removeLegacyGuard?.();this.status = 'stopped'; }
 }
+

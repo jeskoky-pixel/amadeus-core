@@ -26,7 +26,7 @@ export const CONFIG_FIELDS = Object.freeze([
     default: [],
     restart: true,
     group: 'common',
-    zh: { label: '授权 Session allowlist', help: '只有这里列出的合法 DSH Session 可接收自主唤醒；不会自动枚举或伪造 Session。' },
+    zh: { label: '允许自主唤醒的会话', help: '只有这里列出的合法 DSH Session 可接收自主唤醒；不会自动枚举或伪造 Session。' },
     en: { label: 'Allowed Session ids', help: 'Only these valid DSH Session ids may receive autonomous wake. Sessions are never enumerated or invented.' },
   },
   {
@@ -37,7 +37,7 @@ export const CONFIG_FIELDS = Object.freeze([
     restart: true,
     group: 'common',
     zh: {
-      label: '外发提示 Session',
+      label: '允许外发提示的会话',
       help: '必须是 Session allowlist 的子集；默认空列表保持非发送提示。仅这些 Session 内具有持久化模型工具来源的 intent wake 会收到可考虑使用外部工具的提示；idle 与其他意图仍保持非发送提示。本设置不会授予 QQ Scene 权限，实际 QQ 外发由 QQ Scene Guard 决定。',
     },
     en: {
@@ -85,7 +85,7 @@ export const CONFIG_FIELDS = Object.freeze([
     default: '',
     restart: true,
     group: 'common',
-    zh: { label: 'Idle 目标 Session', help: '必须同时出现在 allowlist 中。' },
+    zh: { label: '空闲活动目标会话', help: '必须同时出现在 allowlist 中。' },
     en: { label: 'Idle target Session', help: 'Must also appear in the allowlist.' },
   },
   {
