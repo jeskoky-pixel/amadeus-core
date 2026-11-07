@@ -7,3 +7,4 @@
 本次新增的 `lifeSummary` 是瞬时派生 DTO，不落盘、不进入 Memory、不改变 RecentContext/RecentActivity 的退役决策，也不改变来源内容的权限。平台原始内容仍由现有 Experience 证据链和 ACL 控制。
 
 因此不存在用户数据迁移要求。升级或回滚时，旧 Core 数据格式保持兼容；删除本次新增代码只会使设置页回到原有 Life 视图，不会删除记忆或经历。
+

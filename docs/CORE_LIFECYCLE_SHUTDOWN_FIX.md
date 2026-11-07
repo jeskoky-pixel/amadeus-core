@@ -22,7 +22,7 @@
 - `npm run build` 与 `npm run pack:check` 通过，包含 425 个文件。
 - 新增 `semantic-lifecycle.test.js`，验证异步 embedder 初始化在 store 关闭前被排空，且不会晚到执行人改合并。
 - 主 DSH profile 已备份并安装新包。新包 SHA-256 为 `DB2A8F5E034C4F024F168FAF0F5989766D9B631A00A89D4CF17088B4385FDFCC`，安装目录 semantic 源码与工作区 SHA-256 均为 `F745CC4A71D4CF82857936CF54C2A4DE20705021313701ECED51E7C133DBBB36`。
-- 官方 DSH 后台重启后进程持续响应，监听 `127.0.0.1:3081`。观察窗口内没有新增 crash 日志，旧的 `database is not open` 日志没有再次出现。
+- 12:41 和 12:47 的两份 `database is not open` 日志属于最终构建安装之前的旧 Host 运行。安装最终 Core 后于 16:01 重启官方 DSH，进程持续响应并监听 `127.0.0.1:3081`，截至本记录没有新增 crash 日志。`/health` 不是该版本公开路由，不能把 404 写成健康通过。
 
 ## 仍需单独验收
 

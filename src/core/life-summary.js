@@ -151,3 +151,4 @@ export function buildLifeSummary(runtime) {
     pendingExperienceCount: (Array.isArray(experiences.value) ? experiences.value : []).filter(item => item?.status === 'pending').length,
   }
 }
+

@@ -49,3 +49,4 @@ test('Core module routes fail closed when a module is not mounted', () => {
   assert.equal(result.type, 'div');
   assert.match(JSON.stringify(result), /请先选择工作区/);
 });
+

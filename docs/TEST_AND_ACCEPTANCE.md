@@ -31,8 +31,15 @@ Core 当前源码测试为 226/226；独立模块组也已串行复核通过。�
 ## 2026-11-07 继续实施与真实运行补充
 
 - 本轮已在主 DSH 做一致性备份，并安装当前 Core 构建包；安装目录 `C:\Users\Jesko\.dsh\profiles\desktop\node_modules\@fg-lab\amadeus-core` 与源码 `src/core/runtime.js` SHA-256 均为 `F9AA057805BE7C50354B35BC5C9469B0B0975FF36460EE9AC566A2F4D0B947AF`。
-- DSH 已重启，`127.0.0.1:18787` 返回 `{"ok":true}`；没有合并 PR、发布 npm 或清理旧数据。
+- DSH 已重启，官方 Host 监听 `127.0.0.1:3081`，根路径按设计要求认证，`/health` 在当前版本不存在。`127.0.0.1:18787` 是上游代理，不作为 DSH 健康证据。没有合并 PR、发布 npm 或清理旧数据。
 - 本轮真实 QQ 私聊入站→模型→QQ 回复已验证：入站 `messageId=2127733212`、Session `session-06fc4b99-6246-4ab2-bf22-51db3a225498`、回复 `platformMessageId=493973048`；Life 查询复测入站 `messageId=170082940`，回复 `platformMessageId=1749023676`，两次状态均为 `delivered`。
 - QQ 模型能回忆已保存的 B 站/小红书文本层经历，但在显式 Life 读取复测中仍报告当前 Session 没有 `life_shared_read`/`life_health` 查询工具。代码已加入 `amadeus.life.read` 窄能力和执行时拒绝策略；主环境现有 Session 的权限状态仍为 `safe-chat`、仅 `qq.media.read` 显式允许，Life 能力尚未形成可持久化的真实授权绑定。
 - 因此真实 QQ 入站/出站通过；QQ→Life 概况读取、主动 QQ 外发和自然 Life→Experience→Memory 闭环仍未通过，不能宣称完整验收。
+
+## 2026-11-07 图片链路补充
+
+- 新 TIM 图片事件 `messageId=2009581422` 已写入 QQ 持久状态，图片句柄为 `565D42CED7DA9903A72A4E50388AF672.jpg`。
+- 旧安装包运行时曾返回 `QQ_MEDIA_PATH_OUTSIDE_ROOT`。复核发现主 DSH 安装目录仍是旧 QQ 包，工作树已有的 provider-cache 回退没有被加载。
+- 重新安装 QQ 包后，当前源码使用真实 OneBot transport 回读该句柄，NapCat 返回 provider cache JPEG，可信根、canonical 文件、大小和签名检查通过，Host attachment 保存成功。
+- 该图片事件发生在 QQ 新包安装和 DSH 重启之前，因此尚未证明重启后实际 Provider 请求包含 image block。需要新的 TIM 图片事件完成最后一层模型验收。
 

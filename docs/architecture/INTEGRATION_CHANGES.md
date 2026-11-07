@@ -75,3 +75,4 @@ Further real-run regressions in the same cycle:
 - Restored the original Memory and State native view route; Life summary is now an additive branch and cannot replace Mneme or State rendering.
 - Life summary reads Life admin lists with bounded pagination (200 per page, 5000 item ceiling), reports partial/unavailable sources, distinguishes running/pending/paused/uncertain activities, and only exposes stored/completed experiences as recent completed experience.
 - `lifeSummary` remains owner HTTP/UI data. `amadeusCore.getHealth()` omits it so the model-facing service does not receive owner ledger details through that entry point.
+
