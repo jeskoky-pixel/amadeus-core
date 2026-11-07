@@ -142,6 +142,7 @@ const DICT = {
     core: '仅核心管理', autonomous: '自主唤醒', activity: '本地活动',
     coreHelp: '不启用 Host 唤醒、idle、自主预算或新活动工具。', autonomousHelp: '只对 allowlist Session 启用低频到期/idle 唤醒，默认预算和 bootstrap。', activityHelp: '启用本地虚拟活动工具和 bootstrap；Host 唤醒仍关闭。',
     sessionIds: '允许自主唤醒的会话（多选）', applyPreset: '应用预设到草稿', bootstrapNow: '立即创建默认身份',
+    manualBindingTitle: '绑定其他 Session', manualBindingHelp: '可为不属于当前 Workspace 的可信 DSH Session 创建独立 Persona / Scene 绑定。只输入你确认拥有的 Session ID。', manualBindingId: 'Session ID', manualBindingAction: '创建绑定',
     allowlistTitle: '允许接收自主唤醒的 Session', allowlistHelp: '不会枚举或伪造 Session；请从 DSH Session 列表复制合法 ID。授权与私有范围由现有 binding 决定。',
     externalMessageTitle: '外发提示（仅限工具来源的 intent wake）',
     bindings: 'Persona / Scene 绑定', privacy: '范围', private: '私有', shared: '共享', active: '有效', revoked: '已撤销',
@@ -195,6 +196,7 @@ const DICT = {
     core: 'Core only', autonomous: 'Autonomous wake', activity: 'Local activity',
     coreHelp: 'No Host wake, idle, autonomous budget, or new activity tools.', autonomousHelp: 'Low-frequency due/idle wake only for allowlisted Sessions, with default budget and bootstrap.', activityHelp: 'Local virtual activity tools and bootstrap; Host wake remains off.',
     sessionIds: 'Sessions allowed to wake (multiple selection)', applyPreset: 'Apply preset to draft', bootstrapNow: 'Create default identity now',
+    manualBindingTitle: 'Bind another Session', manualBindingHelp: 'Create an independent Persona / Scene binding for a trusted DSH Session outside the current Workspace. Enter only a Session ID you control.', manualBindingId: 'Session ID', manualBindingAction: 'Create binding',
     allowlistTitle: 'Sessions allowed to receive autonomous wake', allowlistHelp: 'Sessions are not enumerated or invented. Copy valid ids from the DSH Session list. Binding/privacy stays authoritative.',
     externalMessageTitle: 'External-tool guidance (model-tool intent wake only)',
     bindings: 'Persona / Scene bindings', privacy: 'Privacy', private: 'Private', shared: 'Shared', active: 'Active', revoked: 'Revoked',
@@ -316,6 +318,7 @@ function Panel({ ctx }) {
   const [backups, setBackups] = React.useState([]);
   const [workspaceData, setWorkspaceData] = React.useState(null);
   const [workspaceChoice, setWorkspaceChoice] = React.useState('');
+  const [manualSessionId, setManualSessionId] = React.useState('');
   const [ruleDrafts, setRuleDrafts] = React.useState({});
   const [intentForm, setIntentForm] = React.useState({ targetSessionId: '', description: '', reviewAt: '' });
   const [activityForm, setActivityForm] = React.useState({ targetSessionId: '', description: '', intentId: '' });
@@ -484,6 +487,22 @@ function Panel({ ctx }) {
           personaName: draft.values.bootstrapPersonaName || 'Amadeus',
         }),
       });
+      setMessage(t('setupReady') + ' ' + (result.setup.personaId || ''));
+      await loadData();
+    } catch (e) { setError(t('setupFailed') + e.message); }
+    finally { setBusy(false); }
+  };
+
+  const bindManualSession = async () => {
+    const sessionId = manualSessionId.trim();
+    if (!sessionId) return setError(t('invalidSessionId'));
+    setBusy(true); setError('');
+    try {
+      const result = await api('/bootstrap', {
+        method: 'POST',
+        body: JSON.stringify({ sessionIds: [sessionId], personaName: draft?.values.bootstrapPersonaName || 'Amadeus' }),
+      });
+      setManualSessionId('');
       setMessage(t('setupReady') + ' ' + (result.setup.personaId || ''));
       await loadData();
     } catch (e) { setError(t('setupFailed') + e.message); }
@@ -752,7 +771,17 @@ function Panel({ ctx }) {
                         disabled: busy,
                         onClick: () => revoke(binding.targetSessionId),
                       }, t('revoke'))))
-                ))))))
+                ))))))),
+      h('div', { className: 'panel' },
+        h('h3', null, t('manualBindingTitle')),
+        h('p', { className: 'muted' }, t('manualBindingHelp')),
+        h('div', { className: 'row' },
+          h('label', { htmlFor: 'life-manual-session' }, h('strong', null, t('manualBindingId'))),
+          h('input', {
+            id: 'life-manual-session', type: 'text', value: manualSessionId, disabled: busy,
+            placeholder: 'session-…', onChange: (e) => setManualSessionId(e.target.value),
+          }),
+          h('button', { type: 'button', className: 'primary', onClick: bindManualSession, disabled: busy || !manualSessionId.trim() }, t('manualBindingAction')))),
     ) : null,
     tab === 'intents' ? h('div', null,
       h('div', { className: 'panel' }, h('h3', null, t('intentFormTitle')),
@@ -1124,3 +1153,4 @@ return {
     }
   },
 };
+
