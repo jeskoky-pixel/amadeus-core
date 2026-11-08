@@ -129,14 +129,19 @@ export class Experiences {
     try{
       const effective=state.effectiveForSession(entry.sessionId);state.requireAccess(effective,'write');
       const observedTopic=entry.evidenceLevel==='simulation'?null:topicFromObservation(entry,verified);
-      const activitySession=entry.sessionId===r.store.state.activitySessionId;
-      const topicAllowed=effective.mode!=='shared'||activitySession;
+      // State's real shared-scope implementation rejects event topics for all
+      // private Sessions. Core therefore never presents a shared-scope topic
+      // as a writable interest. The bounded observation remains available from
+      // the verified Experience evidence.
+      const topicAllowed=effective.mode!=='shared';
       const topic=topicAllowed?observedTopic:null;
       const result=await state.recordEvent({identity:effective.identity,type:'exploration_completed',source:'host',trust:entry.evidenceLevel==='simulation'?'simulation':'bounded',
         summary:`${entry.evidenceLevel}: ${entry.platform} ${entry.operation}; only returned evidence was observed; no visual understanding claimed.`,
         idempotencyKey:`core:${entry.eventId}`,sourceRef:entry.eventId,evidence:[`${entry.evidenceLevel}:${entry.eventId}`],
         ...(topic?{topic}:{}),interestDelta:topic?0.5:0,scale:0.1,originSessionId:entry.sessionId,occurredAt:entry.occurredAt});
-      entry.stateEffect=result.duplicate?'duplicate':'applied';entry.stateScope=effective.scopeKind??(effective.mode==='shared'?'workspace':'session');entry.stateTopic=topic??null;entry.stateTopicSuppressed=observedTopic&&!topicAllowed?'shared_scope_private_event':null;entry.stateError=null;entry.stateAppliedAt=new Date().toISOString();
+      const interestChanges=Array.isArray(result?.event?.interestChanges)?result.event.interestChanges:[];
+      const interestApplied=!!topic&&interestChanges.some(change=>change?.name===topic&&change?.applied!==false);
+      entry.stateEffect=result.duplicate?'duplicate':'applied';entry.stateScope=effective.scopeKind??(effective.mode==='shared'?'workspace':'session');entry.stateTopic=interestApplied?topic:null;entry.stateTopicCandidate=observedTopic??null;entry.stateInterestApplied=interestApplied;entry.stateTopicSuppressed=observedTopic&&!topicAllowed?'shared_scope_private_event':(observedTopic&&!interestApplied?'state_interest_not_applied':null);entry.stateError=null;entry.stateAppliedAt=new Date().toISOString();
       try{this.save();}catch(error){entry.stateEffect='pending';entry.stateError='state_receipt_persist_failed';try{this.save();}catch{}}
       return entry.stateEffect;
     }catch(error){entry.stateEffect=this.stateError(error);entry.stateError=boundedText(error?.code??error?.message,160);this.save();return entry.stateEffect;}
@@ -158,18 +163,59 @@ export class Experiences {
   async recoverPending(entry){
     const r=this.runtime,currentGeneration=r.store.state.dataGeneration??'original';
     if((entry.dataGeneration??'original')!==currentGeneration){entry.stateEffect='source_invalid';entry.stateError='data_generation_changed';this.save();return false;}
+    if(r.store.state.workspaceId!==entry.workspaceId){entry.stateEffect='permission_denied';entry.stateError='workspace_changed';this.save();return false;}
     const memory=r.bridges.memory;
     let session;
     try{session=member(r.ctx,r.store.state.workspaceId,entry.sessionId);}catch(error){entry.stateEffect='permission_denied';entry.stateError=boundedText(error?.code??error?.message,160);this.save();return false;}
-    let existing=null;
-    try{existing=memory?.unifiedRuntime?.authorize?.run(session,()=>memory?.store?.getById?.(entry.eventId)??null)??null;}catch(error){entry.stateEffect='permission_denied';entry.stateError=boundedText(error?.code??error?.message,160);this.save();return false;}
-    if(existing?.id){entry.memoryId=existing.id;entry.status='stored';entry.stateEffect='pending';this.save();return true;}
+    const state=r.bridges.state?.service;
+    let effective;
+    try{
+      if(typeof state?.effectiveForSession!=='function'||typeof state?.requireAccess!=='function')throw Error('STATE_UNAVAILABLE');
+      effective=state.effectiveForSession(entry.sessionId);state.requireAccess(effective,'write');
+    }catch(error){entry.stateEffect=String(error?.message??'').includes('UNAVAILABLE')?'temporarily_unavailable':'permission_denied';entry.stateError=boundedText(error?.code??error?.message,160);this.save();return false;}
+    const currentScope=effective?.scopeKind??(effective?.mode==='shared'?'workspace':'session');
+    if(entry.stateScope&&entry.stateScope!==currentScope){entry.stateEffect='permission_denied';entry.stateError='state_scope_changed';this.save();return false;}
+    let lookup;
+    try{
+      lookup=memory?.unifiedRuntime?.authorize?.run(session,()=>{
+        const acl=memory.unifiedRuntime.acl;
+        const identity=acl?.identify?.(entry.sessionId);
+        if(!identity||identity.sessionId!==entry.sessionId)throw Error('UNIFIED_SESSION_INVALID');
+        const rows=memory.service?.list?.({type:'history',limit:null,includeArchived:true,includeForgotten:true});
+        if(!Array.isArray(rows))throw Error('CORE_MEMORY_LOOKUP_UNKNOWN');
+        const evidenceRows=rows.filter(row=>Array.isArray(row?.evidence)&&row.evidence.some(item=>item?.ref===entry.eventId));
+        const readable=typeof acl?.filterReadable==='function'?acl.filterReadable(identity,rows):rows;
+        const readableIds=new Set(readable.map(row=>row?.id).filter(Boolean));
+        if(evidenceRows.length>1)throw Error('CORE_EXPERIENCE_MEMORY_AMBIGUOUS');
+        if(evidenceRows.length===1){
+          const row=evidenceRows[0];
+          if(!readableIds.has(row.id))throw Error('CORE_EXPERIENCE_MEMORY_NOT_READABLE');
+          memory.unifiedRuntime.authorize.delivery(session,[row],'tool');
+          return {status:'found',row};
+        }
+        return {status:'absent',scanned:rows.length};
+      });
+    }catch(error){
+      const code=String(error?.code??error?.message??'');
+      entry.stateEffect=code.includes('LOOKUP_UNKNOWN')||code.includes('AMBIGUOUS')?'temporarily_unavailable':'permission_denied';
+      entry.stateError=boundedText(code,160);this.save();return false;
+    }
+    if(lookup?.status==='found'){
+      if(r.store.state.workspaceId!==entry.workspaceId){entry.stateEffect='permission_denied';entry.stateError='workspace_changed';this.save();return false;}
+      try{session=member(r.ctx,r.store.state.workspaceId,entry.sessionId);}catch(error){entry.stateEffect='permission_denied';entry.stateError=boundedText(error?.code??error?.message,160);this.save();return false;}
+      entry.memoryId=lookup.row.id;entry.status='stored';entry.stateEffect='pending';this.save();return true;
+    }
     const receipt=this.readEvidence(entry.eventId,entry);
     if(receipt.status!=='ok'){entry.stateEffect='source_invalid';entry.stateError=`raw_evidence_${receipt.status}`;this.save();return false;}
+    if(r.store.state.workspaceId!==entry.workspaceId){entry.stateEffect='permission_denied';entry.stateError='workspace_changed';this.save();return false;}
+    try{session=member(r.ctx,r.store.state.workspaceId,entry.sessionId);effective=state.effectiveForSession(entry.sessionId);state.requireAccess(effective,'write');}catch(error){entry.stateEffect=String(error?.message??'').includes('UNAVAILABLE')?'temporarily_unavailable':'permission_denied';entry.stateError=boundedText(error?.code??error?.message,160);this.save();return false;}
+    if((effective?.scopeKind??(effective?.mode==='shared'?'workspace':'session'))!==currentScope){entry.stateEffect='permission_denied';entry.stateError='state_scope_changed';this.save();return false;}
     try{
       const summary=readableExperience(entry,receipt.observation),content=experienceText(entry,summary);
-      const saved=await memory.unifiedRuntime.authorize.run(session,()=>memory.service.saveWithDedupe({id:entry.eventId,type:'history',title:`${platformNames[entry.platform]??entry.platform} · ${operationNames[entry.operation]??entry.operation} · ${entry.occurredAt} [${entry.eventId.slice(-16)}]`,content,importance:3,tags:['amadeus-experience',entry.evidenceLevel],evidence:[{kind:'platform-read',ref:entry.eventId}]}));
+      const saved=await memory.unifiedRuntime.authorize.run(session,()=>memory.service.saveWithDedupe({type:'history',title:`${platformNames[entry.platform]??entry.platform} · ${operationNames[entry.operation]??entry.operation} · ${entry.occurredAt} [${entry.eventId.slice(-16)}]`,content,importance:3,tags:['amadeus-experience',entry.evidenceLevel],evidence:[{kind:'platform-read',ref:entry.eventId}]}));
       if(!saved?.memory?.id)throw Error('CORE_EXPERIENCE_MEMORY_REJECTED');
+      if(r.store.state.workspaceId!==entry.workspaceId)throw Error('CORE_EXPERIENCE_WORKSPACE_CHANGED');
+      member(r.ctx,r.store.state.workspaceId,entry.sessionId);
       entry.memoryId=saved.memory.id;entry.status='stored';entry.stateEffect='pending';this.save();return true;
     }catch(error){entry.stateEffect=this.stateError(error);entry.stateError=boundedText(error?.code??error?.message,160);this.save();return false;}
   }
@@ -242,3 +288,4 @@ export class Experiences {
   // Owner admission is performed by the Core HTTP handler, never by model parameters.
   ownerList() {const generation=this.runtime.store.state.dataGeneration??'original';return this.state.events.filter(e=>(e.dataGeneration??'original')===generation).slice(-100).reverse().map(e=>structuredClone(e));}
 }
+
