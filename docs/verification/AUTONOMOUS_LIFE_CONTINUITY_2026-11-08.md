@@ -76,4 +76,3 @@ Installation evidence:
 The existing real ledger proves wake generation, delivery, tool projection, and prior controlled platform reads. It does not prove that a future natural wake will choose a platform, create an intent, or produce a new Experience. The model retains the right to rest. This branch adds the missing source-backed clues and recovery path; it does not manufacture a new wake or claim a natural exploration that did not occur.
 
 No QQ plugin, Mneme internals, platform account, external social action, or user data was changed by this branch. The initial npm and pnpm package-manager attempts exposed an incompatible flat Profile dependency layout and were rolled back from the backup before the final direct Core replacement.
-
