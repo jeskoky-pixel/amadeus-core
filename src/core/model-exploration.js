@@ -70,6 +70,11 @@ export async function observe(runtime,sessionId,input,{social=false}={}){
     controller.signal.throwIfAborted();actor(runtime,sessionId);
     const event=await runtime.experiences.record({platform:input.platform,operation:input.operation,
       activityId:last.activityId,sessionId,step,observation});
+    if(!event||event.status!=='stored'){
+      const error=Object.assign(new Error('CORE_EXPERIENCE_NOT_STORED'),{code:'CORE_EXPERIENCE_NOT_STORED'});
+      error.status=event?.status??'unknown';error.stateEffect=event?.stateEffect??'unknown';
+      throw error;
+    }
     last.steps++;last.events.push(event.eventId);activity.persist();
     await life.checkpointActivity(last.activityId,scope);
     if(last.attempts>=6){
@@ -114,4 +119,4 @@ export function registerExplorationTools(ctx,runtime){
     parameters:{type:'object',properties:{},additionalProperties:false},
     execute:(_args,exec)=>runtime.serial(()=>finish(runtime,exec?.agent?.session?.id)),
     output:{schema:{type:'object',additionalProperties:true},render:(_args,value)=>[{type:'text',text:JSON.stringify(value)}]}});
-}
+}
