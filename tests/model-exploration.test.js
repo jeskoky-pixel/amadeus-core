@@ -7,20 +7,20 @@ import {CoreActivity} from '../src/core/activity.js';
 import {observe,finish} from '../src/core/model-exploration.js';
 import {PlatformRegistry,makeSimulatedAdapter} from '../src/platforms/registry.js';
 
-function fixture(t){
+function fixture(t,{recordStatus='stored'}={}){
   const root=fs.mkdtempSync(path.join(os.tmpdir(),'core-model-'));
   t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
-  const ws={id:'w',sessionIds:['activity','other']};let starts=0,records=0;
+  const ws={id:'w',sessionIds:['activity','other']};let starts=0,records=0,checkpoints=0;
   const runtime={root,status:'ready',store:{state:{workspaceId:'w',activitySessionId:'activity',explorationEnabled:true}},
     ctx:{workspaceRegistry:{get:()=>ws,list:()=>[ws]},sessions:{get:id=>({id,header:{origin:'user'}})}},
-    bridges:{memory:{unifiedRuntime:{}},life:{api:{startActivity:async()=>({id:'a'+(++starts),status:'running'}),checkpointActivity:async()=>{},pauseActivity:async()=>{},finishActivity:async()=>({status:'completed'}),cancelActivity:async()=>({status:'cancelled'})}}},
-    experiences:{record:async()=>({eventId:'event'+(++records)})},platforms:new PlatformRegistry()};
+    bridges:{memory:{unifiedRuntime:{}},life:{api:{startActivity:async()=>({id:'a'+(++starts),status:'running'}),checkpointActivity:async()=>{checkpoints++;},pauseActivity:async()=>{},finishActivity:async()=>({status:'completed'}),cancelActivity:async()=>({status:'cancelled'})}}},
+    experiences:{record:async()=>({eventId:'event'+(++records),status:recordStatus})},platforms:new PlatformRegistry()};
   for(const id of ['simulation-bilibili','simulation-xiaohongshu']){
     runtime.platforms.register(makeSimulatedAdapter(id,[{id:'robot-demo',text:'synthetic'}]));
     runtime.platforms.configure(id,{enabled:true,permissions:['read','search','browse'],maxRequests:20});
   }
   runtime.activity=new CoreActivity(runtime);
-  return {runtime,counts:()=>({starts,records})};
+  return {runtime,counts:()=>({starts,records}),checkpointCount:()=>checkpoints};
 }
 const input={goal:'Choose based on synthetic interest',platform:'simulation-bilibili',operation:'browse'};
 test('model chooses consecutive platforms in one persistent Life activity and can finish naturally',async t=>{
@@ -63,6 +63,15 @@ test('revocation during a provider wait rejects the result and writes no experie
   const pending=observe(runtime,'activity',input);await new Promise(r=>setImmediate(r));
   runtime.platforms.configure('simulation-bilibili',{enabled:false});resolve({text:'late'});
   await assert.rejects(pending,/REVOKED/);assert.equal(counts().records,0);
+});
+
+test('unconfirmed Experience pauses Activity without a success step or Life checkpoint',async t=>{
+  const {runtime,checkpointCount}=fixture(t,{recordStatus:'pending'});
+  await assert.rejects(observe(runtime,'activity',input),error=>error.code==='CORE_EXPERIENCE_NOT_STORED');
+  assert.equal(checkpointCount(),0);
+  assert.equal(runtime.activity.saved.last.steps,0);
+  assert.deepEqual(runtime.activity.saved.last.events,[]);
+  assert.equal(runtime.activity.saved.phase,'Paused');
 });
 
 test('provider transitions preserve terminal state and ignore unrelated activity changes',async t=>{
@@ -122,4 +131,4 @@ test('capability discovery exposes grants only to activity session and future pl
  assert.ok(tools.get('amadeus_platform_interact').parameters.properties.platform.enum.includes('future-platform'));
  const discovery=tools.get('amadeus_platform_capabilities');assert.throws(()=>discovery.execute({}, {agent:{session:{id:'other'}}}),/ACTIVITY_SESSION_REQUIRED/);
  const result=discovery.execute({}, {agent:{session:{id:'activity'}}});assert.equal(result.contractVersion,1);assert.equal(result.platforms[0].enabled,false);assert.deepEqual(result.platforms[0].permissions,[]);assert.ok(!JSON.stringify(result).includes('cookie'));
-});
+});
