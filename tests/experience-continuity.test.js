@@ -205,6 +205,21 @@ test('pending Experience recovers an existing Memory row without a second Memory
   assert.equal(f.writes, 1);
 });
 
+test('direct record of an unresolved pending Experience is an explicit non-success', async t => {
+  const f = fixture(t);
+  const journal = new Experiences(f.runtime);
+  const originalSave = journal.save.bind(journal); let saveCount = 0;
+  journal.save = () => { saveCount += 1; if (saveCount === 2) throw Error('simulated crash after Memory'); return originalSave(); };
+  const observation = await f.registry.execute('bilibili', 'read', {}, { workspaceId: 'w', sessionId: 's', activityId: 'a' });
+  const input = { platform: 'bilibili', activityId: 'a', sessionId: 's', operation: 'read', step: 0, observation };
+  await assert.rejects(journal.record(input));
+  const restarted = new Experiences(f.runtime);
+  restarted.recoverPending = async entry => { entry.stateEffect = 'temporarily_unavailable'; return false; };
+  await assert.rejects(restarted.record(input), error => error.code === 'CORE_EXPERIENCE_NOT_STORED');
+  assert.equal(f.writes, 1);
+  assert.equal(restarted.state.events[0].status, 'pending');
+});
+
 test('State success with receipt persistence failure is recovered by idempotency', async t => {
   const f = fixture(t);
   const journal = new Experiences(f.runtime);
