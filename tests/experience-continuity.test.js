@@ -278,8 +278,12 @@ test('real Mneme recovery finds the generated Memory id by trusted evidence with
   const beforeEntityCalls = entityCalls;
 
   const restarted = new Experiences(f.runtime);
-  const result = await restarted.reconcileStateEffects();
-  assert.equal(result.applied, 1);
+  const [direct, concurrent] = await Promise.all([
+    restarted.record({ platform: 'bilibili', activityId: 'a', sessionId: 's', operation: 'read', step: 0, observation }),
+    restarted.record({ platform: 'bilibili', activityId: 'a', sessionId: 's', operation: 'read', step: 0, observation }),
+  ]);
+  assert.equal(direct.memoryId, before[0].id);
+  assert.equal(concurrent.memoryId, before[0].id);
   const after = service.list({ type: 'history', limit: null, includeArchived: true, includeForgotten: true });
   assert.equal(after.length, 1, 'restart must not create a second Mneme row');
   assert.equal(after[0].id, before[0].id);
@@ -290,6 +294,46 @@ test('real Mneme recovery finds the generated Memory id by trusted evidence with
   assert.equal(embedCalls, beforeEmbedCalls, 'recovery must not schedule a second embedding');
   assert.equal(entityCalls, beforeEntityCalls, 'recovery must not schedule a second entity pass');
   assert.equal(restarted.state.events[0].memoryId, before[0].id);
+
+  const secondJournal = new Experiences(f.runtime);
+  const originalSecondSave = secondJournal.save.bind(secondJournal);
+  let secondSaveCount = 0;
+  secondJournal.save = () => { secondSaveCount++; if (secondSaveCount === 2) throw Error('simulated crash after second Mneme commit'); return originalSecondSave(); };
+  const secondObservation = await f.registry.execute('bilibili', 'read', {}, { workspaceId: 'w', sessionId: 's', activityId: 'b' });
+  await assert.rejects(secondJournal.record({ platform: 'bilibili', activityId: 'b', sessionId: 's', operation: 'read', step: 0, observation: secondObservation }));
+  const beforeStartup = service.list({ type: 'history', limit: null, includeArchived: true, includeForgotten: true });
+  const beforeStartupEmbeddings = store.embeddedCount();
+  const beforeStartupEntities = store.listEntities({ limit: 1000 }).length;
+  const beforeStartupEmbedCalls = embedCalls;
+  const beforeStartupEntityCalls = entityCalls;
+  const startup = new Experiences(f.runtime);
+  const startupResult = await startup.reconcileStateEffects();
+  assert.equal(startupResult.applied, 1);
+  const afterStartup = service.list({ type: 'history', limit: null, includeArchived: true, includeForgotten: true });
+  assert.equal(afterStartup.length, beforeStartup.length, 'startup recovery must not create another Mneme row');
+  assert.equal(store.embeddedCount(), beforeStartupEmbeddings);
+  assert.equal(store.listEntities({ limit: 1000 }).length, beforeStartupEntities);
+  assert.equal(embedCalls, beforeStartupEmbedCalls);
+  assert.equal(entityCalls, beforeStartupEntityCalls);
+});
+
+test('startup recovery ignores pending records that are permanently invalid or denied', async t => {
+  const f = fixture(t);
+  const journal = new Experiences(f.runtime);
+  const effects = ['source_invalid', 'permission_denied', undefined, 'temporarily_unavailable', 'pending'];
+  journal.state.events = Array.from({ length: 25 }, (_, index) => ({
+    eventId: `experience_${String(index).padStart(64, '0')}`,
+    workspaceId: 'w', sessionId: 's', activityId: `a-${index}`, platform: 'bilibili', operation: 'read', step: 0,
+    dataGeneration: 'original', status: 'pending', stateEffect: effects[index % effects.length],
+  }));
+  const called = [];
+  journal.recoverPending = async entry => { called.push(entry.stateEffect ?? 'unset'); return false; };
+  const result = await journal.reconcileStateEffects({ limit: 20 });
+  assert.equal(result.attempted, 15);
+  assert.equal(called.length, 15);
+  assert.ok(called.every(effect => effect === 'unset' || effect === 'pending' || effect === 'temporarily_unavailable'));
+  assert.equal(called.includes('source_invalid'), false);
+  assert.equal(called.includes('permission_denied'), false);
 });
 
 test('real State shared and isolated scopes report applied interestChanges', async t => {
