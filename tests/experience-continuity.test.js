@@ -388,4 +388,3 @@ test('pending recovery fails closed after Workspace migration or Session revocat
   assert.equal(revoked.applied, 0);
   assert.equal(new Experiences(f2.runtime).state.events[0].stateEffect, 'permission_denied');
 });
-
