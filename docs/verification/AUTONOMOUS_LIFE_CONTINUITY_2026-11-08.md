@@ -12,9 +12,9 @@ The existing primary DSH environment was inspected read-only before editing. The
 - Existing controlled Activity evidence includes real Xiaohongshu browse/read and stored Experience rows. Recent natural idle wakes mostly ended with a model decision to rest. This is recorded as a legal autonomous decision, not as a failed platform call.
 - No paused model activity was found requiring forced recovery. The existing Life intent from the earlier controlled opportunity is cancelled; no new intent was fabricated during this task.
 
-The candidate package was first installed into an isolated npm profile and loaded directly from its installed package path. A synthetic Activity Session call against the installed runtime returned the real State field contract (`name`, `baseline`, `activity`, `source`), a source-backed Experience topic, and explicit platform status fields. The final package archive SHA-256 is `278545C359E6D0070679FF1FF1D3933C4D752DE030DE3B327DB7DFCD9BB707A5` (428 files). The final `src/core/experiences.js` SHA-256 is `E03C3B47D72F3A07BF0C1AF2563C4D97611E36A236406759C1F9D1F02F78C5E8`.
+The candidate package was first installed into an isolated npm profile and loaded directly from its installed package path. A synthetic Activity Session call against the installed runtime returned the real State field contract (`name`, `baseline`, `activity`, `source`), a source-backed Experience topic, and explicit platform status fields. The final package archive SHA-256 is `6A0F7E06775FD19F82D0291984A9A41997666B0AA6F905A8721E8D0F62529F28` (428 files). The final `src/core/experiences.js` SHA-256 is `CC0A141ED17D1F36CEC70C8E5B5A5C2F7AB2BDC1D3243A5E8B4754E2DACC7D33`; `src/core/model-exploration.js` is `A077EF9237039E8C2F8B24008DBC01A7D0686FB2B541A18E1689317B1697F29F`.
 
-Before touching the primary DSH, the full desktop profile and Core package were backed up under a timestamped local backup. The primary Profile was then restored after an initial package-manager compatibility check and the candidate Core directory was replaced in place, preserving all other dependencies and the QQ package. The final installed `src/core/experiences.js` SHA-256 is the same `E03C3B47D72F3A07BF0C1AF2563C4D97611E36A236406759C1F9D1F02F78C5E8`; it matches both the GitHub source bytes and the file inside the final package archive. Official DSH Host was restarted from the existing desktop executable. Port 3081 is listening, the Host process points at the desktop Profile, and the Core's `amadeus-xhs-executor.exe` child is running from the installed package.
+Before touching the primary DSH, the full desktop profile and Core package were backed up under a timestamped local backup. The primary Profile was then restored after an initial package-manager compatibility check and the candidate Core directory was replaced in place, preserving all other dependencies and the QQ package. The final installed `src/core/experiences.js` SHA-256 is the same `CC0A141ED17D1F36CEC70C8E5B5A5C2F7AB2BDC1D3243A5E8B4754E2DACC7D33`, and installed `src/core/model-exploration.js` is `A077EF9237039E8C2F8B24008DBC01A7D0686FB2B541A18E1689317B1697F29F`; both match the source bytes and the files inside the final package archive. Official DSH Host was restarted from the existing desktop executable. Port 3081 is listening, the Host process points at the desktop Profile, and the Core's `amadeus-xhs-executor.exe` child is running from the installed package.
 
 ## Experience → State continuity
 
@@ -29,7 +29,7 @@ Before touching the primary DSH, the full desktop profile and Core package were 
 
 Recovery runs once at Core mount for at most 20 explicitly recoverable candidates and through the same per-event flight when a pending event is directly reprocessed. Records marked `source_invalid` or `permission_denied` are excluded from automatic startup retries and require an explicit recheck after their source or permission changes. It scans the current Mneme history for a unique readable `evidence[].ref` match instead of treating `eventId` as a Mneme Memory ID. If the match is ambiguous or the lookup is unavailable, recovery remains retryable and does not write. It reads the existing evidence through the current Memory ACL, never replays a platform request, never creates another Memory row, and uses the existing State idempotency key. Workspace, Session membership, data generation, evidence hash, Memory readability, and State scope are rechecked before recovery writes. Core shutdown skips reconciliation, so no late write is scheduled against a closed database.
 
-The journal schema remains compatible. New fields are optional JSON properties on existing Experience entries; old entries continue to read and are not bulk reprocessed.
+A direct `record()` call on an unresolved existing pending entry now returns `CORE_EXPERIENCE_NOT_STORED` rather than reporting success. Activity observation independently requires `status: stored`; it does not increment steps, append an event, persist the checkpoint, or advance Life when Memory/Core confirmation is still pending. The journal schema remains compatible. New fields are optional JSON properties on existing Experience entries; old entries continue to read and are not bulk reprocessed.
 
 ## Source-backed interests and Activity context
 
@@ -48,20 +48,20 @@ The tool does not create a second model call, scheduler, database, or global sum
 
 ## Automated evidence
 
-The new `tests/experience-continuity.test.js` covers 16 focused continuity cases:
+The focused continuity coverage now contains 18 cases (16 prior cases plus direct unresolved-pending rejection and Activity no-success-step/no-checkpoint regression):
 
 The suite covers Memory exactly once with State retry and idempotent no-replay, missing evidence and data-generation refusal, real State `name`/`baseline`/`activity` data, Activity context ACL and Session isolation, shared and isolated State scope, malicious external title and Life intent handling, source invalidation and cache refusal, Memory-success pending recovery without a second Memory write, State-success receipt persistence failure with idempotent recovery, shutdown waiting for in-flight Experience work, and platform account, budget, cooldown and readiness states.
 
 Verification completed on Windows:
 
-- Core tests: 242 passed, 0 failed.
+- Core tests: 244 passed, 0 failed.
 - Module tests: Memory 2745 passed, Life 218, State 143, Persona 50; all groups passed.
 - `npm run build`: passed.
 - `npm run pack:check`: passed (`@fg-lab/amadeus-core@0.2.0-alpha.6`, 428 files).
 
 The focused real-service cases additionally prove that a crash after Mneme commits a generated Memory ID but before the Core journal stores it is recovered by the trusted evidence reference without a second `saveWithDedupe()` call. They exercise direct `record()` recovery, concurrent same-event recovery, and startup recovery. They snapshot the Memory row, content history, entity records, embeddings, and extractor call counts before and after recovery. The State cases use the real State service and assert shared versus isolated `interestChanges`, rather than relying on mock return values. Workspace migration and Session revocation both fail closed during pending recovery. Mixed pending candidates confirm that permanently invalid or denied entries do not consume automatic recovery slots.
 
-The fresh pre-install backup was `C:\\Users\\Jesko\\.dsh\\backups\\20261108-pr5-final-20261108-162441`, with the Core, QQ data, and installed Core directory preserved. Before replacement the live journal contained 36 stored Experiences and zero pending or pending State effects.
+The fresh pre-install backup was `C:\\Users\\Jesko\\.dsh\\backups\\20261108-pr5-final2-20261108-191104`, with the Core, QQ data, and installed Core directory preserved. Before replacement the live journal contained 36 stored Experiences and zero pending or pending State effects.
 
 Installation evidence:
 
