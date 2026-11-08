@@ -12,9 +12,9 @@ The existing primary DSH environment was inspected read-only before editing. The
 - Existing controlled Activity evidence includes real Xiaohongshu browse/read and stored Experience rows. Recent natural idle wakes mostly ended with a model decision to rest. This is recorded as a legal autonomous decision, not as a failed platform call.
 - No paused model activity was found requiring forced recovery. The existing Life intent from the earlier controlled opportunity is cancelled; no new intent was fabricated during this task.
 
-The candidate package was first installed into an isolated npm profile and loaded directly from its installed package path. A synthetic Activity Session call against the installed runtime returned the real State field contract (`name`, `baseline`, `activity`, `source`), a source-backed Experience topic, and explicit platform status fields. The isolated installed `src/core/runtime.js` SHA-256 was `12B012678FFB9ADB78C0E5FDAD2C778BECE51998A407378993B58939E65D1317`.
+The candidate package was first installed into an isolated npm profile and loaded directly from its installed package path. A synthetic Activity Session call against the installed runtime returned the real State field contract (`name`, `baseline`, `activity`, `source`), a source-backed Experience topic, and explicit platform status fields. The final package archive SHA-256 is `278545C359E6D0070679FF1FF1D3933C4D752DE030DE3B327DB7DFCD9BB707A5` (428 files). The final `src/core/experiences.js` SHA-256 is `E03C3B47D72F3A07BF0C1AF2563C4D97611E36A236406759C1F9D1F02F78C5E8`.
 
-Before touching the primary DSH, the full desktop profile and Core package were backed up under a timestamped local backup. The primary Profile was then restored after an initial package-manager compatibility check and the candidate Core directory was replaced in place, preserving all other dependencies and the QQ package. The primary installed Core runtime SHA-256 is the same `12B012678FFB9ADB78C0E5FDAD2C778BECE51998A407378993B58939E65D1317`. Official DSH Host was restarted from the existing desktop executable. Port 3081 is listening, the Host process points at the desktop Profile, and the Core's `amadeus-xhs-executor.exe` child is running from the installed package.
+Before touching the primary DSH, the full desktop profile and Core package were backed up under a timestamped local backup. The primary Profile was then restored after an initial package-manager compatibility check and the candidate Core directory was replaced in place, preserving all other dependencies and the QQ package. The final installed `src/core/experiences.js` SHA-256 is the same `E03C3B47D72F3A07BF0C1AF2563C4D97611E36A236406759C1F9D1F02F78C5E8`; it matches both the GitHub source bytes and the file inside the final package archive. Official DSH Host was restarted from the existing desktop executable. Port 3081 is listening, the Host process points at the desktop Profile, and the Core's `amadeus-xhs-executor.exe` child is running from the installed package.
 
 ## Experience → State continuity
 
@@ -54,14 +54,14 @@ The suite covers Memory exactly once with State retry and idempotent no-replay, 
 
 Verification completed on Windows:
 
-- Core tests: 241 passed, 0 failed.
+- Core tests: 242 passed, 0 failed.
 - Module tests: Memory 2745 passed, Life 218, State 143, Persona 50; all groups passed.
 - `npm run build`: passed.
 - `npm run pack:check`: passed (`@fg-lab/amadeus-core@0.2.0-alpha.6`, 428 files).
 
 The focused real-service cases additionally prove that a crash after Mneme commits a generated Memory ID but before the Core journal stores it is recovered by the trusted evidence reference without a second `saveWithDedupe()` call. They exercise direct `record()` recovery, concurrent same-event recovery, and startup recovery. They snapshot the Memory row, content history, entity records, embeddings, and extractor call counts before and after recovery. The State cases use the real State service and assert shared versus isolated `interestChanges`, rather than relying on mock return values. Workspace migration and Session revocation both fail closed during pending recovery. Mixed pending candidates confirm that permanently invalid or denied entries do not consume automatic recovery slots.
 
-The candidate archive SHA-256 was `0A82D0ADA04BBC029E1E13A6B193DD651F5FA785C036B7883444F8673FB71D71`. The fresh pre-install backup was `C:\\Users\\Jesko\\.dsh\\backups\\20261108-pr5-final-20261108-162441`, with the Core, QQ data, and installed Core directory preserved. Before replacement the live journal contained 36 stored Experiences and zero pending or pending State effects.
+The fresh pre-install backup was `C:\\Users\\Jesko\\.dsh\\backups\\20261108-pr5-final-20261108-162441`, with the Core, QQ data, and installed Core directory preserved. Before replacement the live journal contained 36 stored Experiences and zero pending or pending State effects.
 
 Installation evidence:
 
