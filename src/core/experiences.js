@@ -256,7 +256,11 @@ export class Experiences {
     if(entry?.status==='stored') { await this.applyStateEffect(entry); return structuredClone(entry); }
     if(entry?.status==='pending') {
       const recovered=await this.recoverPendingOnce(entry);
-      if(!recovered)return structuredClone(entry);
+      if(!recovered){
+        const error=Object.assign(new Error('CORE_EXPERIENCE_NOT_STORED'),{code:'CORE_EXPERIENCE_NOT_STORED'});
+        error.status=entry.status;error.stateEffect=entry.stateEffect??'unknown';
+        throw error;
+      }
       await this.applyStateEffect(entry);
       return structuredClone(entry);
     }
