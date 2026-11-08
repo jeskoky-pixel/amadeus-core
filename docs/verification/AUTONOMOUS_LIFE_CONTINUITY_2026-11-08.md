@@ -27,7 +27,7 @@ Before touching the primary DSH, the full desktop profile and Core package were 
 - `source_invalid` for missing/tampered evidence or a changed data generation;
 - `not_applicable` for social operations that are not State read events.
 
-Recovery runs once at Core mount for at most 20 stored candidates and again when the same event is safely reprocessed. It reads the existing evidence through the current Memory ACL, never replays a platform request, never creates another Memory row, and uses the existing State idempotency key. Core shutdown skips reconciliation, so no late write is scheduled against a closed database.
+Recovery runs once at Core mount for at most 20 stored candidates and again when the same event is safely reprocessed. It scans the current Mneme history for a unique readable `evidence[].ref` match instead of treating `eventId` as a Mneme Memory ID. If the match is ambiguous or the lookup is unavailable, recovery remains retryable and does not write. It reads the existing evidence through the current Memory ACL, never replays a platform request, never creates another Memory row, and uses the existing State idempotency key. Workspace, Session membership, data generation, evidence hash, Memory readability, and State scope are rechecked before recovery writes. Core shutdown skips reconciliation, so no late write is scheduled against a closed database.
 
 The journal schema remains compatible. New fields are optional JSON properties on existing Experience entries; old entries continue to read and are not bulk reprocessed.
 
@@ -48,16 +48,18 @@ The tool does not create a second model call, scheduler, database, or global sum
 
 ## Automated evidence
 
-The new `tests/experience-continuity.test.js` covers:
+The new `tests/experience-continuity.test.js` covers 15 focused continuity cases:
 
 The suite covers Memory exactly once with State retry and idempotent no-replay, missing evidence and data-generation refusal, real State `name`/`baseline`/`activity` data, Activity context ACL and Session isolation, shared and isolated State scope, malicious external title and Life intent handling, source invalidation and cache refusal, Memory-success pending recovery without a second Memory write, State-success receipt persistence failure with idempotent recovery, shutdown waiting for in-flight Experience work, and platform account, budget, cooldown and readiness states.
 
 Verification completed on Windows:
 
-- Core tests: 238 passed, 0 failed.
+- Core tests: 241 passed, 0 failed.
 - Module tests: Memory 2745 passed, Life 218, State 143, Persona 50; all groups passed.
 - `npm run build`: passed.
 - `npm run pack:check`: passed (`@fg-lab/amadeus-core@0.2.0-alpha.6`, 428 files).
+
+The focused real-service cases additionally prove that a crash after Mneme commits a generated Memory ID but before the Core journal stores it is recovered by the trusted evidence reference without a second `saveWithDedupe()` call. They snapshot the Memory row, content history, entity records, embeddings, and extractor call counts before and after recovery. The State cases use the real State service and assert shared versus isolated `interestChanges`, rather than relying on mock return values. Workspace migration and Session revocation both fail closed during pending recovery.
 
 Installation evidence:
 
