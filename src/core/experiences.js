@@ -311,4 +311,3 @@ export class Experiences {
   // Owner admission is performed by the Core HTTP handler, never by model parameters.
   ownerList() {const generation=this.runtime.store.state.dataGeneration??'original';return this.state.events.filter(e=>(e.dataGeneration??'original')===generation).slice(-100).reverse().map(e=>structuredClone(e));}
 }
-
