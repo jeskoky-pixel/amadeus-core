@@ -6,6 +6,9 @@ import path from 'node:path';
 import { PlatformRegistry } from '../src/platforms/registry.js';
 import { Experiences, topicFromObservation } from '../src/core/experiences.js';
 import { CoreRuntime } from '../src/core/runtime.js';
+import { createStore as createMemoryStore } from '../src/modules/memory/src/store.js';
+import { createService as createMemoryService } from '../src/modules/memory/src/service.js';
+import { makeService as makeStateService, fakeWorkspaceRegistry } from '../src/modules/state/test/helpers.js';
 
 function fixture(t, { failStateOnce = false, stateMode = 'isolated' } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'core-continuity-'));
@@ -24,7 +27,7 @@ function fixture(t, { failStateOnce = false, stateMode = 'isolated' } = {}) {
       if (failStateOnce && stateCalls === 1) throw Object.assign(new Error('temporary storage'), { code: 'STATE_STORAGE' });
       if (stateKeys.has(input.idempotencyKey)) return { duplicate: true };
       stateKeys.add(input.idempotencyKey);
-      return { duplicate: false, event: { id: input.idempotencyKey } };
+      return { duplicate: false, event: { id: input.idempotencyKey, interestChanges: stateMode === 'shared' ? [] : (input.topic ? [{ name: input.topic, applied: true }] : []) } };
     },
     viewForSession: () => ({ access: { mode: stateMode, scopeKind: stateMode === 'shared' ? 'workspace' : 'session' }, interests: [{ name: '道路安全技术', baseline: 60, activity: 42, source: 'event' }] }),
   };
@@ -36,8 +39,14 @@ function fixture(t, { failStateOnce = false, stateMode = 'isolated' } = {}) {
     bridges: {
       state: { service: state },
       memory: {
-        unifiedRuntime: { authorize: { run: (_session, fn) => fn(), delivery: () => {} } },
-        service: { saveWithDedupe: async row => { writes++; memories.set(row.id, { id: row.id, ...row }); return { memory: { id: row.id } }; } },
+        unifiedRuntime: {
+          authorize: { run: (_session, fn) => fn(), delivery: () => {} },
+          acl: { identify: id => sessions.has(id) ? { sessionId: id } : null, filterReadable: (_identity, rows) => rows },
+        },
+        service: {
+          saveWithDedupe: async row => { writes++; const id = row.id?.startsWith('experience_') ? `memory-${writes}` : row.id; memories.set(id, { ...row, id }); return { memory: { id } }; },
+          list: () => [...memories.values()],
+        },
         store: { getById: id => memories.get(id) },
       },
       life: { api: { listIntents: () => [] } },
@@ -191,7 +200,8 @@ test('pending Experience recovers an existing Memory row without a second Memory
   await assert.rejects(journal.record({ platform: 'bilibili', activityId: 'a', sessionId: 's', operation: 'read', step: 0, observation }));
   assert.equal(f.writes, 1);
   const restarted = new Experiences(f.runtime);
-  assert.equal((await restarted.reconcileStateEffects()).applied, 1);
+  const recovered = await restarted.reconcileStateEffects();
+  assert.equal(recovered.applied, 1);
   assert.equal(f.writes, 1);
 });
 
@@ -231,3 +241,107 @@ test('platform context distinguishes budget exhaustion and cooldown', async t =>
   const cooldownContext = CoreRuntime.prototype.activityContext.call(cooldown.runtime, 's');
   assert.equal(cooldownContext.platforms[0].status, 'cooldown');
 });
+
+test('real Mneme recovery finds the generated Memory id by trusted evidence without a second write', async t => {
+  const f = fixture(t);
+  const store = createMemoryStore(':memory:');
+  const service = createMemoryService({ store, mirror: null, config: { entityExtractionEnabled: true } });
+  let embedCalls = 0;
+  let entityCalls = 0;
+  service.setEmbedder({ ready: true, embedSingle: async () => { embedCalls++; return [1, 2, 3]; } });
+  service.setEntityExtractor(async () => { entityCalls++; return { ok: true, entities: [], attrs: [], relations: [] }; });
+  f.runtime.bridges.memory = {
+    unifiedRuntime: {
+      authorize: { run: (_session, fn) => fn(), delivery: () => {} },
+      acl: { identify: id => id === 's' ? { sessionId: 's' } : null, filterReadable: (_identity, rows) => rows },
+    },
+    service,
+    store,
+  };
+  t.after(() => store.close());
+  const journal = new Experiences(f.runtime);
+  const originalSave = journal.save.bind(journal);
+  let saveCount = 0;
+  journal.save = () => { saveCount++; if (saveCount === 2) throw Error('simulated crash after Mneme commit'); return originalSave(); };
+  const observation = await f.registry.execute('bilibili', 'read', {}, { workspaceId: 'w', sessionId: 's', activityId: 'a' });
+  await assert.rejects(journal.record({ platform: 'bilibili', activityId: 'a', sessionId: 's', operation: 'read', step: 0, observation }));
+  await new Promise(resolve => setImmediate(resolve));
+  const before = service.list({ type: 'history', limit: null, includeArchived: true, includeForgotten: true });
+  assert.equal(before.length, 1);
+  assert.notEqual(before[0].id, journal.state.events[0].eventId, 'Mneme generates its own Memory id');
+  assert.equal(before[0].evidence[0].ref, journal.state.events[0].eventId);
+  const beforeContent = before[0].content;
+  const beforeHistory = before[0].content_history;
+  const beforeEmbeddings = store.embeddedCount();
+  const beforeEntities = store.listEntities({ limit: 1000 }).length;
+  const beforeEmbedCalls = embedCalls;
+  const beforeEntityCalls = entityCalls;
+
+  const restarted = new Experiences(f.runtime);
+  const result = await restarted.reconcileStateEffects();
+  assert.equal(result.applied, 1);
+  const after = service.list({ type: 'history', limit: null, includeArchived: true, includeForgotten: true });
+  assert.equal(after.length, 1, 'restart must not create a second Mneme row');
+  assert.equal(after[0].id, before[0].id);
+  assert.equal(after[0].content, beforeContent);
+  assert.deepEqual(after[0].content_history, beforeHistory);
+  assert.equal(store.embeddedCount(), beforeEmbeddings);
+  assert.equal(store.listEntities({ limit: 1000 }).length, beforeEntities);
+  assert.equal(embedCalls, beforeEmbedCalls, 'recovery must not schedule a second embedding');
+  assert.equal(entityCalls, beforeEntityCalls, 'recovery must not schedule a second entity pass');
+  assert.equal(restarted.state.events[0].memoryId, before[0].id);
+});
+
+test('real State shared and isolated scopes report applied interestChanges', async t => {
+  const registry = fakeWorkspaceRegistry({ workspaces: [{ id: 'w', sessionIds: ['s', 'other'] }] });
+  const sharedHarness = makeStateService({ registry });
+  const isolatedHarness = makeStateService({ registry });
+  t.after(() => { sharedHarness.close(); isolatedHarness.close(); });
+  sharedHarness.service.bindWorkspace({ workspaceId: 'w' });
+  isolatedHarness.service.bindWorkspace({ workspaceId: 'w' });
+  isolatedHarness.service.setSessionRule({ sessionId: 'other', mode: 'isolated' });
+
+  const shared = fixture(t);
+  shared.runtime.bridges.state.service = sharedHarness.service;
+  const sharedObservation = await shared.registry.execute('bilibili', 'read', {}, { workspaceId: 'w', sessionId: 'other', activityId: 'shared' });
+  const sharedEvent = await new Experiences(shared.runtime).record({ platform: 'bilibili', activityId: 'shared', sessionId: 'other', operation: 'read', step: 0, observation: sharedObservation });
+  assert.equal(sharedEvent.stateScope, 'workspace');
+  assert.equal(sharedEvent.stateTopic, null);
+  assert.equal(sharedEvent.stateInterestApplied, false);
+  assert.equal(sharedHarness.service.viewForSession('s').interests.length, 0);
+
+  const isolated = fixture(t);
+  isolated.runtime.bridges.state.service = isolatedHarness.service;
+  const isolatedObservation = await isolated.registry.execute('bilibili', 'read', {}, { workspaceId: 'w', sessionId: 'other', activityId: 'isolated' });
+  const isolatedEvent = await new Experiences(isolated.runtime).record({ platform: 'bilibili', activityId: 'isolated', sessionId: 'other', operation: 'read', step: 0, observation: isolatedObservation });
+  assert.equal(isolatedEvent.stateScope, 'session');
+  assert.equal(isolatedEvent.stateInterestApplied, true);
+  assert.equal(isolatedEvent.stateTopic, '道路安全技术的夜间照明');
+  assert.ok(isolatedHarness.service.viewForSession('other').interests.some(item => item.name === '道路安全技术的夜间照明'));
+  assert.equal(isolatedHarness.service.viewForSession('s').interests.length, 0);
+});
+
+test('pending recovery fails closed after Workspace migration or Session revocation', async t => {
+  const f = fixture(t);
+  const journal = new Experiences(f.runtime);
+  const originalSave = journal.save.bind(journal); let saveCount = 0;
+  journal.save = () => { saveCount++; if (saveCount === 2) throw Error('simulated crash after Memory'); return originalSave(); };
+  const observation = await f.registry.execute('bilibili', 'read', {}, { workspaceId: 'w', sessionId: 's', activityId: 'a' });
+  await assert.rejects(journal.record({ platform: 'bilibili', activityId: 'a', sessionId: 's', operation: 'read', step: 0, observation }));
+  f.runtime.store.state.workspaceId = 'replacement';
+  const migrated = await new Experiences(f.runtime).reconcileStateEffects();
+  assert.equal(migrated.applied, 0);
+  assert.equal(new Experiences(f.runtime).state.events[0].stateError, 'workspace_changed');
+
+  const f2 = fixture(t);
+  const journal2 = new Experiences(f2.runtime);
+  const originalSave2 = journal2.save.bind(journal2); let saveCount2 = 0;
+  journal2.save = () => { saveCount2++; if (saveCount2 === 2) throw Error('simulated crash after Memory'); return originalSave2(); };
+  const observation2 = await f2.registry.execute('bilibili', 'read', {}, { workspaceId: 'w', sessionId: 's', activityId: 'a' });
+  await assert.rejects(journal2.record({ platform: 'bilibili', activityId: 'a', sessionId: 's', operation: 'read', step: 0, observation: observation2 }));
+  f2.runtime.ctx.workspaceRegistry.list = () => [{ id: 'w', sessionIds: ['other'] }];
+  const revoked = await new Experiences(f2.runtime).reconcileStateEffects();
+  assert.equal(revoked.applied, 0);
+  assert.equal(new Experiences(f2.runtime).state.events[0].stateEffect, 'permission_denied');
+});
+
