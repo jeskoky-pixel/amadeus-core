@@ -8,6 +8,7 @@ import { member } from './host.js';
 const platformNames={bilibili:'B站','xiaohongshu-browser':'小红书',xiaohongshu:'小红书'};
 const operationNames={browse:'浏览推荐',search:'搜索',read:'读取详情',comments:'阅读评论',related:'浏览相关内容',like:'点赞',comment:'评论',reply:'回复'};
 const STATE_OPERATIONS=new Set(['read','browse','search','comments','related','subtitles','images']);
+const RECOVERABLE_STATE_EFFECTS=new Set(['pending','temporarily_unavailable','unavailable-or-denied']);
 const boundedText=(value,limit)=>typeof value==='string'?value.replace(/[\u0000-\u001f\u007f]/g,' ').slice(0,limit):'';
 function readableExperience(entry,observation){
   const observed=observation.observedEvidence??{},data=observed.data??observed;
@@ -67,6 +68,7 @@ export class Experiences {
     this.state = fs.existsSync(this.file) ? JSON.parse(fs.readFileSync(this.file,'utf8')) : {schema:1,events:[]};
     if(this.state.schema!==1 || !Array.isArray(this.state.events)) throw Error('CORE_EXPERIENCE_SCHEMA');
     this.inFlight=new Set();
+    this.recoveryFlights=new Map();
   }
   save() { atomicJson(this.file,this.state); }
   track(task){const promise=Promise.resolve().then(task);this.inFlight.add(promise);promise.finally(()=>this.inFlight.delete(promise)).catch(()=>{});return promise;}
@@ -149,16 +151,31 @@ export class Experiences {
   async reconcileStateEffects({limit=20}={}){return this.track(()=>this._reconcileStateEffects({limit}));}
   async _reconcileStateEffects({limit=20}={}){
     if(this.runtime.status!=='ready')return {attempted:0,applied:0,skipped:0};
-    const candidates=this.state.events.filter(entry=>STATE_OPERATIONS.has(entry.operation)&&((entry.status==='stored'&&(!entry.stateEffect||['pending','temporarily_unavailable','unavailable-or-denied'].includes(entry.stateEffect)))||entry.status==='pending')).slice(-Math.max(0,Math.min(100,limit)));
+    const candidates=this.state.events.filter(entry=>{
+      const recoverable=!entry.stateEffect||RECOVERABLE_STATE_EFFECTS.has(entry.stateEffect);
+      return STATE_OPERATIONS.has(entry.operation)&&recoverable&&(
+        entry.status==='pending'||
+        (entry.status==='stored'&&(!entry.stateEffect||RECOVERABLE_STATE_EFFECTS.has(entry.stateEffect)))
+      );
+    }).slice(-Math.max(0,Math.min(100,limit)));
     let applied=0;
     for(const entry of candidates){
       if(entry.status==='pending'){
-        const recovered=await this.recoverPending(entry);
+        const recovered=await this.recoverPendingOnce(entry);
         if(!recovered)continue;
       }
       const result=await this.applyStateEffect(entry);if(result==='applied'||result==='duplicate')applied++;
     }
     return {attempted:candidates.length,applied,skipped:candidates.length-applied};
+  }
+  recoverPendingOnce(entry){
+    const key=entry.eventId;
+    const active=this.recoveryFlights.get(key);
+    if(active)return active;
+    const flight=Promise.resolve().then(()=>this.recoverPending(entry));
+    this.recoveryFlights.set(key,flight);
+    flight.finally(()=>{if(this.recoveryFlights.get(key)===flight)this.recoveryFlights.delete(key);}).catch(()=>{});
+    return flight;
   }
   async recoverPending(entry){
     const r=this.runtime,currentGeneration=r.store.state.dataGeneration??'original';
@@ -237,6 +254,12 @@ export class Experiences {
     const eventId='experience_'+createHash('sha256').update(JSON.stringify(key)).digest('hex');
     let entry=this.state.events.find(e=>e.eventId===eventId);
     if(entry?.status==='stored') { await this.applyStateEffect(entry); return structuredClone(entry); }
+    if(entry?.status==='pending') {
+      const recovered=await this.recoverPendingOnce(entry);
+      if(!recovered)return structuredClone(entry);
+      await this.applyStateEffect(entry);
+      return structuredClone(entry);
+    }
     if(!entry) {
       if(this.state.events.length>=10000) throw Error('CORE_EXPERIENCE_CAPACITY');
       const observed=observation?.observedEvidence;
