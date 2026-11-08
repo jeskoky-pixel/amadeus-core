@@ -47,6 +47,7 @@ export class PlatformRegistry {
     return this.list().find(x=>x.id===id);
   }
   list(){return [...this.entries].map(([id,e])=>({id,name:e.adapter.name??id,version:e.adapter.version??'1',mode:e.adapter.simulated?'simulation':'real',simulated:e.adapter.simulated===true,authMethods:e.adapter.authMethods??[],account:this.accounts?.status(id)??null,autonomous:e.autonomous??e.adapter.simulated===true,minIntervalMs:e.minIntervalMs??0,...(e.adapter.socialWrites?{social:e.social??socialPolicy(),actions:this.journal.list(id)}:{}),enabled:e.enabled,capabilities:[...e.adapter.capabilities],permissions:[...e.permissions],used:e.used,maxRequests:e.maxRequests}));}
+  availability(id){const e=this.entries.get(id);if(!e)return null;const account=this.accounts?.status(id)??null;const cooldownRemainingMs=e.lastCall===undefined?0:Math.max(0,(e.minIntervalMs??0)-(this.now()-e.lastCall));return {requiresAccount:e.adapter.requiresAccount===true,accountAvailable:e.adapter.simulated===true||e.adapter.requiresAccount!==true||account?.accounts?.some(row=>row.status==='authenticated')===true,cooldownRemainingMs,budgetRemaining:Math.max(0,e.maxRequests-e.used)};}
   execute(id,operation,input,identity,{signal}={}){
     const e=this.entries.get(id);
     if(!e)return Promise.reject(Error('CORE_PLATFORM_UNAVAILABLE'));

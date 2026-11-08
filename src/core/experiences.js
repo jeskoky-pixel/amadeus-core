@@ -66,8 +66,11 @@ export class Experiences {
     this.file = path.join(runtime.root,'experiences.json');
     this.state = fs.existsSync(this.file) ? JSON.parse(fs.readFileSync(this.file,'utf8')) : {schema:1,events:[]};
     if(this.state.schema!==1 || !Array.isArray(this.state.events)) throw Error('CORE_EXPERIENCE_SCHEMA');
+    this.inFlight=new Set();
   }
   save() { atomicJson(this.file,this.state); }
+  track(task){const promise=Promise.resolve().then(task);this.inFlight.add(promise);promise.finally(()=>this.inFlight.delete(promise)).catch(()=>{});return promise;}
+  async waitForIdle(){while(this.inFlight.size)await Promise.allSettled([...this.inFlight]);}
   evidenceFile(eventId) { return path.join(this.runtime.root,'experience-evidence',`${eventId}.json`); }
   // Host-only, trusted-receipt write. Atomic and idempotent for one eventId;
   // no model/HTTP entry point reaches this method.
@@ -125,23 +128,53 @@ export class Experiences {
     if(!state){entry.stateEffect='temporarily_unavailable';entry.stateError='state_unavailable';this.save();return entry.stateEffect;}
     try{
       const effective=state.effectiveForSession(entry.sessionId);state.requireAccess(effective,'write');
-      const topic=entry.evidenceLevel==='simulation'?null:topicFromObservation(entry,verified);
+      const observedTopic=entry.evidenceLevel==='simulation'?null:topicFromObservation(entry,verified);
+      const activitySession=entry.sessionId===r.store.state.activitySessionId;
+      const topicAllowed=effective.mode!=='shared'||activitySession;
+      const topic=topicAllowed?observedTopic:null;
       const result=await state.recordEvent({identity:effective.identity,type:'exploration_completed',source:'host',trust:entry.evidenceLevel==='simulation'?'simulation':'bounded',
         summary:`${entry.evidenceLevel}: ${entry.platform} ${entry.operation}; only returned evidence was observed; no visual understanding claimed.`,
         idempotencyKey:`core:${entry.eventId}`,sourceRef:entry.eventId,evidence:[`${entry.evidenceLevel}:${entry.eventId}`],
         ...(topic?{topic}:{}),interestDelta:topic?0.5:0,scale:0.1,originSessionId:entry.sessionId,occurredAt:entry.occurredAt});
-      entry.stateEffect=result.duplicate?'duplicate':'applied';entry.stateTopic=topic??null;entry.stateError=null;entry.stateAppliedAt=new Date().toISOString();this.save();
+      entry.stateEffect=result.duplicate?'duplicate':'applied';entry.stateScope=effective.scopeKind??(effective.mode==='shared'?'workspace':'session');entry.stateTopic=topic??null;entry.stateTopicSuppressed=observedTopic&&!topicAllowed?'shared_scope_private_event':null;entry.stateError=null;entry.stateAppliedAt=new Date().toISOString();
+      try{this.save();}catch(error){entry.stateEffect='pending';entry.stateError='state_receipt_persist_failed';try{this.save();}catch{}}
       return entry.stateEffect;
     }catch(error){entry.stateEffect=this.stateError(error);entry.stateError=boundedText(error?.code??error?.message,160);this.save();return entry.stateEffect;}
   }
-  async reconcileStateEffects({limit=20}={}){
+  async reconcileStateEffects({limit=20}={}){return this.track(()=>this._reconcileStateEffects({limit}));}
+  async _reconcileStateEffects({limit=20}={}){
     if(this.runtime.status!=='ready')return {attempted:0,applied:0,skipped:0};
-    const candidates=this.state.events.filter(entry=>entry.status==='stored'&&STATE_OPERATIONS.has(entry.operation)&&(!entry.stateEffect||['pending','temporarily_unavailable','unavailable-or-denied'].includes(entry.stateEffect))).slice(-Math.max(0,Math.min(100,limit)));
+    const candidates=this.state.events.filter(entry=>STATE_OPERATIONS.has(entry.operation)&&((entry.status==='stored'&&(!entry.stateEffect||['pending','temporarily_unavailable','unavailable-or-denied'].includes(entry.stateEffect)))||entry.status==='pending')).slice(-Math.max(0,Math.min(100,limit)));
     let applied=0;
-    for(const entry of candidates){const result=await this.applyStateEffect(entry);if(result==='applied'||result==='duplicate')applied++;}
+    for(const entry of candidates){
+      if(entry.status==='pending'){
+        const recovered=await this.recoverPending(entry);
+        if(!recovered)continue;
+      }
+      const result=await this.applyStateEffect(entry);if(result==='applied'||result==='duplicate')applied++;
+    }
     return {attempted:candidates.length,applied,skipped:candidates.length-applied};
   }
-  async record({platform,activityId,sessionId,operation,observation,step}) {
+  async recoverPending(entry){
+    const r=this.runtime,currentGeneration=r.store.state.dataGeneration??'original';
+    if((entry.dataGeneration??'original')!==currentGeneration){entry.stateEffect='source_invalid';entry.stateError='data_generation_changed';this.save();return false;}
+    const memory=r.bridges.memory;
+    let session;
+    try{session=member(r.ctx,r.store.state.workspaceId,entry.sessionId);}catch(error){entry.stateEffect='permission_denied';entry.stateError=boundedText(error?.code??error?.message,160);this.save();return false;}
+    let existing=null;
+    try{existing=memory?.unifiedRuntime?.authorize?.run(session,()=>memory?.store?.getById?.(entry.eventId)??null)??null;}catch(error){entry.stateEffect='permission_denied';entry.stateError=boundedText(error?.code??error?.message,160);this.save();return false;}
+    if(existing?.id){entry.memoryId=existing.id;entry.status='stored';entry.stateEffect='pending';this.save();return true;}
+    const receipt=this.readEvidence(entry.eventId,entry);
+    if(receipt.status!=='ok'){entry.stateEffect='source_invalid';entry.stateError=`raw_evidence_${receipt.status}`;this.save();return false;}
+    try{
+      const summary=readableExperience(entry,receipt.observation),content=experienceText(entry,summary);
+      const saved=await memory.unifiedRuntime.authorize.run(session,()=>memory.service.saveWithDedupe({id:entry.eventId,type:'history',title:`${platformNames[entry.platform]??entry.platform} · ${operationNames[entry.operation]??entry.operation} · ${entry.occurredAt} [${entry.eventId.slice(-16)}]`,content,importance:3,tags:['amadeus-experience',entry.evidenceLevel],evidence:[{kind:'platform-read',ref:entry.eventId}]}));
+      if(!saved?.memory?.id)throw Error('CORE_EXPERIENCE_MEMORY_REJECTED');
+      entry.memoryId=saved.memory.id;entry.status='stored';entry.stateEffect='pending';this.save();return true;
+    }catch(error){entry.stateEffect=this.stateError(error);entry.stateError=boundedText(error?.code??error?.message,160);this.save();return false;}
+  }
+  async record(input){return this.track(()=>this._record(input));}
+  async _record({platform,activityId,sessionId,operation,observation,step}) {
     const r=this.runtime, workspaceId=r.store.state.workspaceId;
     const session=member(r.ctx,workspaceId,sessionId), memory=r.bridges.memory;
     if(!memory?.unifiedRuntime) throw Error('CORE_MEMORY_UNAVAILABLE');

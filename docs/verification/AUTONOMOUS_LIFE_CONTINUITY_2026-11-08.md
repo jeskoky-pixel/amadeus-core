@@ -33,32 +33,29 @@ The journal schema remains compatible. New fields are optional JSON properties o
 
 For read-like platform operations, a short State topic is derived only from verified returned title, description, or bounded comment text. If no such text exists, no topic is written. A single read receives a small bounded event weight and is described as recent observation, never as a stable personality preference.
 
-The Activity Session system-prompt section now appends a short derived context on each legal wake. It may contain:
+The Activity Session system-prompt section now contains only static rules. A legal Activity Session can call the read-only `amadeus_activity_context` tool for bounded structured data. The tool marks external platform text and Life descriptions as untrusted data and grants no platform or social permission. It may return:
 
 - up to five current State interests from that Session;
 - up to three recent stored Experience topics from that Session, each with a short event reference;
 - up to two active Life intents in that Session scope;
 - one running/paused activity checkpoint when it is already present;
-- enabled autonomous platform read capabilities and remaining budget.
+- State access mode and scope kind;
+- platform configuration, account availability, remaining budget, cooldown and current status (`disabled`, `account_unavailable`, `budget_exhausted`, `cooldown`, or `ready`).
 
-The context is generated synchronously in the existing prompt section. It does not create a second model call, scheduler, database, or global summary. Non-Activity Sessions receive an empty context. External text remains untrusted data, and the model is explicitly free to continue, create a legitimate Life intent, organize, or rest.
+The tool does not create a second model call, scheduler, database, or global summary. Non-Activity Sessions receive no context data. Experience topics are included only when the current Memory ACL and raw evidence check both succeed. A cached `stateTopic` is never used after evidence becomes missing, invalid, or unavailable. When the State scope is `shared`, a private non-Activity event cannot write its topic into the Workspace interest. An isolated scope keeps its own topic.
 
 ## Automated evidence
 
 The new `tests/experience-continuity.test.js` covers:
 
-1. Memory exactly once plus State retry and idempotent no-replay;
-2. missing evidence refusal;
-3. data-generation change refusal;
-4. Activity context ACL/session isolation;
-5. source-backed topic extraction and unknown-topic behavior.
+The suite covers Memory exactly once with State retry and idempotent no-replay, missing evidence and data-generation refusal, real State `name`/`baseline`/`activity` data, Activity context ACL and Session isolation, shared and isolated State scope, malicious external title and Life intent handling, source invalidation and cache refusal, Memory-success pending recovery without a second Memory write, State-success receipt persistence failure with idempotent recovery, shutdown waiting for in-flight Experience work, and platform account, budget, cooldown and readiness states.
 
 Verification completed on Windows:
 
-- Core tests: 230 passed, 0 failed.
+- Core tests: 238 passed, 0 failed.
 - Module tests: Memory 2745 passed, Life 218, State 143, Persona 50; all groups passed.
 - `npm run build`: passed.
-- `npm run pack:check`: passed (`@fg-lab/amadeus-core@0.2.0-alpha.6`, 427 files).
+- `npm run pack:check`: passed (`@fg-lab/amadeus-core@0.2.0-alpha.6`, 428 files).
 
 ## Natural-life boundary
 
