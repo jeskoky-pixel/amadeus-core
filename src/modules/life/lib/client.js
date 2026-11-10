@@ -746,7 +746,22 @@ function sessionChoices(sessions = [], selected = [], lang = 'zh') {
     rows.set(s.sessionId, { id:s.sessionId, title:typeof s.title === 'string' ? s.title.trim() : '', unavailable:false });
   }
   for (const id of selected) if (typeof id === 'string' && id && !rows.has(id)) rows.set(id,{id,title:'',unavailable:true});
-  return [...rows.values()].map(s=>({...s,label:(s.unavailable ? (lang==='zh'?'已保存但当前不可用':'Saved but unavailable') : s.title || (lang==='zh'?'未命名会话':'Untitled session'))+' · '+s.id.slice(-8)}));
+  const values = [...rows.values()];
+  const titleCounts = new Map();
+  for (const s of values) if (!s.unavailable && s.title) titleCounts.set(s.title, (titleCounts.get(s.title) ?? 0) + 1);
+  const titleIndexes = new Map();
+  return values.map(s => {
+    const fallback = s.unavailable ? (lang === 'zh' ? '已保存但当前不可用' : 'Saved but unavailable') : (lang === 'zh' ? '未命名会话' : 'Untitled session');
+    let label = s.title || fallback;
+    if (s.title && (titleCounts.get(s.title) ?? 0) > 1) {
+      const index = (titleIndexes.get(s.title) ?? 0) + 1;
+      titleIndexes.set(s.title, index);
+      label = `${label} · ${index}`;
+    } else if (!s.title) {
+      label += ` · ${s.id.slice(-8)}`;
+    }
+    return { ...s, label };
+  });
 }
 
 

@@ -36,6 +36,42 @@ const memoryFormFields = ['language', 'dreamThresholdCount', 'dreamThresholdChar
   'vectorSearchThreshold', 'hybridSearchVectorWeight', 'autoReindexOnBoot'];
 const memoryPolicy = Object.freeze({ sceneIsolationEnabled: true, sceneStrictQQ: true,
   unifiedSessionAclEnabled: true, personaEnabled: false });
+function cleanSessionTitle(value) {
+  if (typeof value !== 'string') return '';
+  return value.trim().replace(/\s+/g, ' ').slice(0, 300);
+}
+/**
+ * Resolve a user-facing Session title without changing the trusted Session ID
+ * used by Life ACLs. Persisted Sessions may be unloaded, so the DSH Session
+ * service is not sufficient on its own. The QQ fallback is limited to the
+ * connector's verified scene contract and never accepts a title from model or
+ * HTTP input.
+ */
+export function resolveSessionTitle(ctx, sessionId) {
+  if (typeof sessionId !== 'string' || !sessionId) return '';
+  try {
+    const session = host(ctx, 'sessions')?.get?.(sessionId);
+    for (const value of [
+      session?.header?.title,
+      session?.header?.name,
+      session?.header?.label,
+      session?.title,
+      session?.name,
+    ]) {
+      const title = cleanSessionTitle(value);
+      if (title) return title;
+    }
+  } catch { /* SessionStore may reject an unloaded or retired Session. */ }
+  try {
+    const scene = host(ctx, 'qq')?.resolveTrustedSessionScene?.(sessionId);
+    if (scene?.verified !== true || !['group', 'private'].includes(scene.kind)) return '';
+    const sceneId = typeof scene.id === 'string' ? scene.id : '';
+    const peerId = typeof scene.peerId === 'string' ? scene.peerId : sceneId.split(':').at(-1);
+    if (!/^\d{1,20}$/.test(peerId ?? '')) return '';
+    return `${scene.kind === 'group' ? '群聊' : '私聊'} ${peerId}`;
+  } catch { /* QQ is optional for non-QQ Sessions. */ }
+  return '';
+}
 function formValue(value) {
   // Schemastery volatile values are runtime refs, not JSON field values.
   if(value && typeof value.get==='function' && Symbol.for('cosmokit.volatile.write') in value)return formValue(value.get());
@@ -90,7 +126,7 @@ export class CoreRuntime {
       const module = definitions[n];
       const config = { ...this.effectiveConfig(n), __coreBridge: bridge => { this.bridges[n] = bridge; } };
       if (n === 'memory') Object.assign(config, { memoryDir, ...memoryPolicy });
-      if (n === 'life') config.__coreSessionTitle = id => id === this.store.state.activitySessionId ? 'Amadeus 自主活动' : host(this.ctx, 'sessions')?.get(id)?.header?.title ?? '';
+      if (n === 'life') config.__coreSessionTitle = id => id === this.store.state.activitySessionId ? 'Amadeus 自主活动' : resolveSessionTitle(this.ctx, id);
       if (n === 'life' || n === 'state') config.databasePath = path.join(moduleRoot, n, `${n}.sqlite`);
       if (n === 'persona') config.dataDirectory = path.join(moduleRoot, 'persona');
       this.activeConfigs[n]=config;
